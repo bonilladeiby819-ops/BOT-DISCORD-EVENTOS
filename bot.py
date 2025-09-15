@@ -1,11 +1,12 @@
+import asyncio
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 import json
 import uuid
-import asyncio
 
 # -----------------------------
 # CARGAR VARIABLES DEL .env
@@ -17,8 +18,8 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
+GUILD = discord.Object(id=GUILD_ID)
 
 EVENTS_FILE = "eventos.json"
 
@@ -34,11 +35,6 @@ BUTTONS = {
     'DECLINADO': ('❌', discord.ButtonStyle.secondary),
     'TENTATIVO': ('⚠️', discord.ButtonStyle.primary)
 }
-
-# -----------------------------
-# GUILD REAL (se asigna cuando el bot está listo)
-# -----------------------------
-GUILD = None  # se llenará en on_ready
 
 # -----------------------------
 # CARGAR / GUARDAR EVENTOS
@@ -371,9 +367,8 @@ async def check_events():
 # -----------------------------
 # COMANDO /eventos adaptado
 # -----------------------------
-@bot.tree.command(name="eventos", description="Crear un evento paso a paso")
+@bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=GUILD)
 async def eventos(interaction: discord.Interaction):
-    guild = bot.get_guild(GUILD_ID)  # siempre obtenemos guild real
     # Evitar "Aplicación no ha respondido"
     await interaction.response.defer(ephemeral=True)
     await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
@@ -725,13 +720,8 @@ async def proximos_eventos_visual(interaction: discord.Interaction):
 # -----------------------------
 @bot.event
 async def on_ready():
-    global GUILD
-    GUILD = bot.get_guild(GUILD_ID)
-    if not GUILD:
-        print(f"❌ No encontré el guild con ID {GUILD_ID}")
-    else:
-        await bot.tree.sync(guild=GUILD)  # registrar comandos en guild real
-        print(f"✅ Bot conectado como {bot.user} en guild {GUILD.name}")
+    await bot.tree.sync(guild=GUILD)
     check_events.start()
+    print(f"Bot conectado como {bot.user}")
 
 bot.run(TOKEN)
