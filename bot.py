@@ -371,8 +371,9 @@ async def check_events():
 # -----------------------------
 # COMANDO /eventos adaptado
 # -----------------------------
-@bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=GUILD)
+@bot.tree.command(name="eventos", description="Crear un evento paso a paso")
 async def eventos(interaction: discord.Interaction):
+    guild = bot.get_guild(GUILD_ID)  # siempre obtenemos guild real
     # Evitar "Aplicación no ha respondido"
     await interaction.response.defer(ephemeral=True)
     await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
