@@ -1,12 +1,11 @@
-import asyncio
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 import json
 import uuid
+import asyncio
 
 # -----------------------------
 # CARGAR VARIABLES DEL .env
@@ -18,8 +17,8 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
-GUILD = discord.Object(id=GUILD_ID)
 
 EVENTS_FILE = "eventos.json"
 
@@ -35,6 +34,11 @@ BUTTONS = {
     'DECLINADO': ('❌', discord.ButtonStyle.secondary),
     'TENTATIVO': ('⚠️', discord.ButtonStyle.primary)
 }
+
+# -----------------------------
+# GUILD REAL (se asigna cuando el bot está listo)
+# -----------------------------
+GUILD = None  # se llenará en on_ready
 
 # -----------------------------
 # CARGAR / GUARDAR EVENTOS
@@ -720,8 +724,13 @@ async def proximos_eventos_visual(interaction: discord.Interaction):
 # -----------------------------
 @bot.event
 async def on_ready():
-    await bot.tree.sync(guild=GUILD)
+    global GUILD
+    GUILD = bot.get_guild(GUILD_ID)
+    if not GUILD:
+        print(f"❌ No encontré el guild con ID {GUILD_ID}")
+    else:
+        await bot.tree.sync(guild=GUILD)  # registrar comandos en guild real
+        print(f"✅ Bot conectado como {bot.user} en guild {GUILD.name}")
     check_events.start()
-    print(f"Bot conectado como {bot.user}")
 
 bot.run(TOKEN)
