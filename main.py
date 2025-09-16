@@ -1,34 +1,57 @@
-from keep_alive import keep_alive
+# main.py
 import os
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
 
-TOKEN = os.environ["DISCORD_TOKEN"]
-GUILD_ID = int(os.environ["GUILD_ID"])  # 👈 pon tu server ID en Koyeb
-GUILD = discord.Object(id=GUILD_ID)
+# -----------------------------
+# CARGAR VARIABLES DE ENTORNO
+# -----------------------------
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = int(os.getenv("GUILD_ID"))
 
-# Configuración de intents
+# -----------------------------
+# CONFIGURACIÓN DEL BOT
+# -----------------------------
 intents = discord.Intents.default()
-intents.messages = True
-intents.guilds = True
-intents.members = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# -----------------------------
+# EVENTO ON_READY
+# -----------------------------
 @bot.event
 async def on_ready():
-    await bot.tree.sync(guild=GUILD)  # 👈 sincroniza los slash commands en tu server
-    print(f"✅ Bot conectado como {bot.user}")
-    print(f"📌 Slash commands sincronizados en {GUILD_ID}")
+    try:
+        guild = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"📌 Slash commands sincronizados en {GUILD_ID}: {[cmd.name for cmd in synced]}")
+    except Exception as e:
+        print(f"❌ Error al sincronizar: {e}")
 
-# Slash command de prueba
-@bot.tree.command(name="ping", description="Prueba slash command", guild=GUILD)
+    print(f"✅ Bot conectado como {bot.user}")
+
+# -----------------------------
+# COMANDO /ping
+# -----------------------------
+@bot.tree.command(name="ping", description="Responde con Pong!", guild=discord.Object(id=GUILD_ID))
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong!", ephemeral=True)
 
-# Inicia el servidor keep-alive
+# -----------------------------
+# COMANDO /hola
+# -----------------------------
+@bot.tree.command(name="hola", description="Te saluda el bot", guild=discord.Object(id=GUILD_ID))
+async def hola(interaction: discord.Interaction):
+    await interaction.response.send_message("👋 Hola! ¿Cómo estás?", ephemeral=True)
+
+# -----------------------------
+# KEEP ALIVE PARA KOYEB
+# -----------------------------
+from keep_alive import keep_alive
 keep_alive()
 
-# Inicia el bot
+# -----------------------------
+# INICIAR BOT
+# -----------------------------
 bot.run(TOKEN)
-
