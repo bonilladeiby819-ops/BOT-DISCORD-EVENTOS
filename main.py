@@ -188,16 +188,16 @@ class EventButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         global events
-        nickname = interaction.user.display_name
+        user_id = interaction.user.id
         for event in events:
             if event["id"] == self.event_id:
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
                 # Registrar usuario en el rol seleccionado
-                if nickname not in event["participants_roles"][self.role_key]:
-                    event["participants_roles"][self.role_key].append(nickname)
-
+                if user_id not in event["participants_roles"][self.role_key]:
+                   event["participants_roles"][self.role_key].append(user_id)
+                    
                     # Quitar de otros roles si no permites multi-respuesta
                     for key, lst in event["participants_roles"].items():
                         if key != self.role_key and nickname in lst:
@@ -439,11 +439,13 @@ async def check_events():
         # Recordatorio 15 minutos antes
         if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
             mentions = []
-            for role in ["INF", "OFICIAL", "TANQUE", "RECON", "COMANDANTE"]:
-                for name in event["participants_roles"].get(role, []):
-                    member = discord.utils.find(lambda m: m.display_name == name, guild.members)
-                    if member:
-                        mentions.append(member.mention)
+for role_key, user_ids in event.get("participants_roles", {}).items():
+    if role_key == "DECLINADO":
+        continue
+    for user_id in user_ids:
+        member = guild.get_member(user_id)
+        if member and member not in mentions:
+            mentions.append(member)
             channel = bot.get_channel(event["channel_id"])
             if channel:
                 await channel.send(f"Recordatorio! 15 minutos para el inicio del evento.\nParticipantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}")
@@ -529,8 +531,8 @@ async def send_event_reminder(event):
     # Enviar mensaje de bienvenida en el hilo con menciones
     if thread:
         await thread.send(
-            f"¡Bienvenidos al evento! {', '.join(m.mention for m in mentions) if mentions else 'No hay participantes aún.'}",
-            allowed_mentions=discord.AllowedMentions(users=True)  # Esto permite mencionar usuarios
+    f"¡Bienvenidos al evento! {', '.join(m.mention for m in mentions) if mentions else 'No hay participantes aún.'}",
+    allowed_mentions=discord.AllowedMentions(users=True))  # Esto permite mencionar usuarios
         )
 
     # Enviar DM a cada participante
