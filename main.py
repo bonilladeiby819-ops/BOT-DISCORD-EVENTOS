@@ -186,31 +186,34 @@ class EventButton(discord.ui.Button):
         self.event_id = event_id
         self.role_key = role_key
 
-    async def callback(self, interaction: discord.Interaction):
-        global events
-        user_id = interaction.user.id
-        for event in events:
-            if event["id"] == self.event_id:
-                if "participants_roles" not in event:
-                    event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
+async def callback(self, interaction: discord.Interaction):
+    global events
+    nickname = interaction.user.display_name
+    user_id = interaction.user.id
 
-                # Registrar usuario en el rol seleccionado
-                if user_id not in event["participants_roles"][self.role_key]:
-                   event["participants_roles"][self.role_key].append(user_id)
-                    
-                # Quitar de otros roles
+    for event in events:
+        if event["id"] == self.event_id:
+            if "participants_roles" not in event:
+                event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
+
+            # Registrar al usuario en el rol seleccionado
+            if not event.get("multi_response", False):
+                # Quitar de otros roles primero
                 for key, lst in event["participants_roles"].items():
                     if key != self.role_key and nickname in lst:
                         lst.remove(nickname)
 
+            if nickname not in event["participants_roles"][self.role_key]:
+                event["participants_roles"][self.role_key].append(nickname)
 
-                    save_events(events)
-                    await update_event_embed_and_thread(event)
+            save_events(events)
+            await update_event_embed_and_thread(event)
 
-                await interaction.response.send_message(
-                    f"Te has inscrito como {self.role_key}", ephemeral=True
-                )
-                return
+            await interaction.response.send_message(
+                f"Te has inscrito como {self.role_key}", ephemeral=True
+            )
+            return
+
 
 
 class EventActionButton(discord.ui.Button):
@@ -434,52 +437,55 @@ class EventView(discord.ui.View):
         self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
 
 # -----------------------------
-# TAREA DE RECORDATORIOS Y CREACIÓN DE HILO
+# LOOP DE RECORDATORIOS
 # -----------------------------
 @tasks.loop(seconds=60)
 async def check_events():
     global events
     now = datetime.now()
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
     for event in events:
         start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
-        guild = bot.get_guild(GUILD_ID)
-        if not guild:
-            continue
 
-# Recordatorio 15 minutos antes
-if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
-    mentions = []
+        # Recordatorio 15 minutos antes
+        if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
+            mentions = []
 
-    for role_key, user_ids in event.get("participants_roles", {}).items():
-        if role_key == "DECLINADO":
-            continue
-        for user_id in user_ids:
-            member = guild.get_member(user_id)
-            if member and member not in mentions:
-                mentions.append(member.mention)  # 👈 importante usar .mention
+            for role_key, user_ids in event.get("participants_roles", {}).items():
+                if role_key == "DECLINADO":
+                    continue
+                for user_id in user_ids:
+                    member = guild.get_member(user_id)
+                    if member and member not in mentions:
+                        mentions.append(member.mention)  # 👈 ahora sí menciona al usuario
 
-    channel = bot.get_channel(event["channel_id"])
-    if channel:
-        # Enviar recordatorio en el canal
-        await channel.send(
-            f"Recordatorio! 15 minutos para el inicio del evento.\n"
-            f"Participantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}"
-        )
+            channel = bot.get_channel(event["channel_id"])
+            if channel:
+                # Enviar recordatorio en el canal
+                await channel.send(
+                    f"⏰ Recordatorio! 15 minutos para el inicio del evento.\n"
+                    f"Participantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}"
+                )
 
-        # Crear hilo dentro del canal
-        thread_name = f"Hilo - {event['title']}"
-        thread = await channel.create_thread(
-            name=thread_name,
-            type=discord.ChannelType.public_thread
-        )
+                # Crear hilo dentro del canal
+                thread_name = f"Hilo - {event['title']}"
+                thread = await channel.create_thread(
+                    name=thread_name,
+                    type=discord.ChannelType.public_thread
+                )
 
-        await thread.send(
-            f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}"
-        )
+                await thread.send(
+                    f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}"
+                )
 
-    # Marcar como recordatorio enviado y guardar cambios
-    event["reminder_sent"] = True
-    save_events(events)
+            # Marcar como recordatorio enviado y guardar cambios
+            event["reminder_sent"] = True
+            save_events(events)
+
+
 
 
         # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
