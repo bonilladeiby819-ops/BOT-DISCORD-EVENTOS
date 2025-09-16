@@ -114,7 +114,12 @@ def create_event_embed(event):
     # Participantes por rol
     for key, (emoji, _) in BUTTONS.items():
         names = event.get("participants_roles", {}).get(key, [])
-        text = ", ".join(names) if names else "Nadie aún"
+        count = len(names)
+        if names:
+            # Cada participante en una línea y mostrar la cantidad
+            text = f"({count})\n" + "\n".join(f"- {name}" for name in names)
+        else:
+            text = "Nadie aún"
         embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
 
     # Mostrar roles mencionados
