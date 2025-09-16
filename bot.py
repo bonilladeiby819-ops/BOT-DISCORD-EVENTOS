@@ -1,61 +1,63 @@
-from keep_alive import keep_alive
+# main.py
 import os
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
 
-# ==============================
-# CONFIGURACIÓN
-# ==============================
-TOKEN = os.environ["DISCORD_TOKEN"]
-GUILD_ID = int(os.environ["GUILD_ID"])
-GUILD = discord.Object(id=GUILD_ID)
+# -----------------------------
+# CARGAR VARIABLES DE ENTORNO
+# -----------------------------
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = int(os.getenv("GUILD_ID"))  # asegúrate que en Koyeb está como número
 
-# Intents necesarios
+# -----------------------------
+# CONFIGURACIÓN DE BOT
+# -----------------------------
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
 
-# Usamos commands.Bot (NO Client)
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
-# ==============================
+# -----------------------------
 # EVENTO ON_READY
-# ==============================
+# -----------------------------
 @bot.event
 async def on_ready():
-    print(f"✅ Bot conectado como {bot.user}")
     try:
-        synced = await bot.tree.sync(guild=GUILD)
-        print(f"📌 {len(synced)} comandos sincronizados en {GUILD_ID}")
+        guild = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"📌 Slash commands sincronizados en {GUILD_ID}: {[cmd.name for cmd in synced]}")
     except Exception as e:
         print(f"❌ Error al sincronizar: {e}")
 
+    print(f"✅ Bot conectado como {bot.user}")
 
-# ==============================
-# COMANDOS
-# ==============================
-
-# /ping
-@bot.tree.command(name="ping", description="Responde con Pong!", guild=GUILD)
+# -----------------------------
+# COMANDO /ping
+# -----------------------------
+@bot.tree.command(name="ping", description="Responde con Pong!", guild=discord.Object(id=int(os.getenv("GUILD_ID"))))
 async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("🏓 Pong!")
+    await interaction.response.send_message("🏓 Pong!", ephemeral=True)
 
-
-# /eventos
-@bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=GUILD)
+# -----------------------------
+# COMANDO /eventos
+# -----------------------------
+@bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=discord.Object(id=int(os.getenv("GUILD_ID"))))
 async def eventos(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        "🎉 Aquí empezaría el proceso de creación del evento..."
-    )
+    await interaction.response.send_message("📅 Aquí iniciaremos la creación de un evento paso a paso.", ephemeral=True)
 
-
-# ==============================
-# KEEP ALIVE + RUN
-# ==============================
+# -----------------------------
+# KEEP ALIVE (para Koyeb)
+# -----------------------------
+from keep_alive import keep_alive
 keep_alive()
-bot.run(TOKEN)
 
+# -----------------------------
+# INICIAR BOT
+# -----------------------------
+bot.run(TOKEN)
 
 
