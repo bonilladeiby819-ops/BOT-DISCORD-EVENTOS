@@ -343,6 +343,42 @@ class EventView(discord.ui.View):
             self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
         self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
         self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+
+# -----------------------------
+# TAREA DE RECORDATORIOS Y CREACIÓN DE HILO
+# -----------------------------
+@tasks.loop(seconds=60)
+async def check_events():
+    global events
+    now = datetime.now()
+    for event in events:
+        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            continue
+
+        # Recordatorio 15 minutos antes
+        if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
+            mentions = []
+            for role in ["INF", "OFICIAL", "TANQUE", "RECON", "COMANDANTE"]:
+                for name in event["participants_roles"].get(role, []):
+                    member = discord.utils.find(lambda m: m.display_name == name, guild.members)
+                    if member:
+                        mentions.append(member.mention)
+            channel = bot.get_channel(event["channel_id"])
+            if channel:
+                await channel.send(f"Recordatorio! 15 minutos para el inicio del evento.\nParticipantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}")
+                # Crear hilo dentro del canal
+                thread_name = f"Hilo - {event['title']}"
+                thread = await channel.create_thread(name=thread_name, type=discord.ChannelType.public_thread)
+                await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
+            event["reminder_sent"] = True
+            save_events(events)
+
+        # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
+        # if not event.get("channel_created") and now >= start_dt:
+        #     event["channel_created"] = True
+        #     save_events(events)
 # -----------------------------
 # LOOP DE RECORDATORIOS
 # -----------------------------
@@ -386,43 +422,6 @@ async def check_event_reminders():
 # INICIAR LOOP
 # -----------------------------
 check_event_reminders.start()
-
-# -----------------------------
-# TAREA DE RECORDATORIOS Y CREACIÓN DE HILO
-# -----------------------------
-@tasks.loop(seconds=60)
-async def check_events():
-    global events
-    now = datetime.now()
-    for event in events:
-        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
-        guild = bot.get_guild(GUILD_ID)
-        if not guild:
-            continue
-
-        # Recordatorio 15 minutos antes
-        if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
-            mentions = []
-            for role in ["INF", "OFICIAL", "TANQUE", "RECON", "COMANDANTE"]:
-                for name in event["participants_roles"].get(role, []):
-                    member = discord.utils.find(lambda m: m.display_name == name, guild.members)
-                    if member:
-                        mentions.append(member.mention)
-            channel = bot.get_channel(event["channel_id"])
-            if channel:
-                await channel.send(f"Recordatorio! 15 minutos para el inicio del evento.\nParticipantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}")
-                # Crear hilo dentro del canal
-                thread_name = f"Hilo - {event['title']}"
-                thread = await channel.create_thread(name=thread_name, type=discord.ChannelType.public_thread)
-                await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
-            event["reminder_sent"] = True
-            save_events(events)
-
-        # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
-        # if not event.get("channel_created") and now >= start_dt:
-        #     event["channel_created"] = True
-        #     save_events(events)
-
 # -----------------------------
 # COMANDO /ping
 # -----------------------------
