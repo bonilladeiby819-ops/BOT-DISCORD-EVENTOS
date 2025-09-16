@@ -274,7 +274,8 @@ class EventButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         global events
-        user_id = interaction.user.id  # <- Cambiado de display_name a user.id
+        user_id = interaction.user.id
+        channel = interaction.channel  # ✅ ahora tienes el canal
 
         for event in events:
             if event["id"] == self.event_id:
@@ -293,9 +294,12 @@ class EventButton(discord.ui.Button):
 
                 save_events(events)
 
-                # Actualizar embed principal
-                embed = create_event_embed(event)
-                channel = bot.get_channel(event["channel_id"])
+                # ✅ Embed actualizado
+                embed = await create_event_embed(event)
+
+                # ✅ Aquí corregido: usamos self.event_id y interaction.user
+                await channel.send(embed=embed, view=EventView(self.event_id, interaction.user.id))
+
                 if channel and "message_id" in event:
                     try:
                         msg = await channel.fetch_message(event["message_id"])
@@ -323,8 +327,6 @@ class EventButton(discord.ui.Button):
                     ephemeral=True
                 )
                 return
-
-
 
         if self.label == "Eliminar evento":
             events.remove(event)
@@ -637,14 +639,29 @@ async def hola(interaction: discord.Interaction):
 # -----------------------------
 # COMANDO /eventos
 # -----------------------------
-@bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(
+    name="eventos",
+    description="Crear un evento paso a paso",
+    guild=discord.Object(id=GUILD_ID)
+)
 async def eventos(interaction: discord.Interaction):
+    import uuid
+    event_id = str(uuid.uuid4())   # ✅ se crea primero
+    event = {}                     # ✅ el diccionario también antes de usarlo
+
+    embed = await create_event_embed(event)  # ahora sí existe event y event_id
+
+    channel = interaction.channel  # canal donde se publicará
+    await channel.send(embed=embed, view=EventView(event_id, interaction.user.id))
+
+    await interaction.response.send_message("Evento creado ✅", ephemeral=True)
+
     await interaction.response.defer(ephemeral=True)
     await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
+
     user = interaction.user
     dm = await user.create_dm()
 
-    event = {}  # Diccionario temporal
 
     # -----------------------------
     # 1️⃣ Canal
@@ -877,6 +894,28 @@ async def eventos(interaction: discord.Interaction):
 
         elif option == 8:  # Finalizar
             break
+    
+    # -----------------------------
+    # 🔧 Parches para los errores
+    # -----------------------------
+    import uuid
+    event_id = str(uuid.uuid4())       # ✅ Definir event_id único
+    event["id"] = event_id             # ✅ Guardarlo en el evento
+    event["creator_id"] = user.id
+
+    channel = bot.get_channel(event["channel_id"])  # ✅ Definir channel
+
+    embed = await create_event_embed(event)         # ✅ Asegurar que se espera la coroutine
+
+    sent_message = await channel.send(              # ✅ Usar event_id definido
+        embed=embed,
+        view=EventView(event_id, user.id)
+    )
+
+    event["message_id"] = sent_message.id           # ✅ Guardar ID del mensaje
+    save_events(events)
+
+    await dm.send("✅ Evento creado y publicado correctamente!")
 
     # -----------------------------
     # Guardar evento en la base de datos
