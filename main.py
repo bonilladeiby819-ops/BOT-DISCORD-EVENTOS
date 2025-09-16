@@ -32,6 +32,347 @@ async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
 
 # -----------------------------
+# BOTONES CON EMOJIS VÁLIDOS
+# -----------------------------
+BUTTONS = {
+    'INF': ('🪖', discord.ButtonStyle.success),
+    'OFICIAL': ('🎖️', discord.ButtonStyle.primary),
+    'TANQUE': ('🛡️', discord.ButtonStyle.success),
+    'RECON': ('🔭', discord.ButtonStyle.secondary),
+    'COMANDANTE': ('⭐', discord.ButtonStyle.danger),
+    'DECLINADO': ('❌', discord.ButtonStyle.secondary),
+    'TENTATIVO': ('⚠️', discord.ButtonStyle.primary)
+}
+
+# -----------------------------
+# CARGAR / GUARDAR EVENTOS
+# -----------------------------
+def load_events():
+    if os.path.exists(EVENTS_FILE):
+        with open(EVENTS_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_events(events):
+    with open(EVENTS_FILE, "w") as f:
+        json.dump(events, f, indent=4, default=str)
+
+events = load_events()
+
+# -----------------------------
+# ESPERA POR MENSAJES
+# -----------------------------
+async def wait_for_number(user, dm, min_val, max_val, cancel_word="cancelar"):
+    def check(m):
+        return m.author == user and m.guild is None
+    while True:
+        msg = await bot.wait_for("message", check=check)
+        if msg.content.lower() == cancel_word:
+            return None
+        if msg.content.isdigit() and min_val <= int(msg.content) <= max_val:
+            return int(msg.content)
+        await dm.send(f"Introduce un número entre {min_val} y {max_val}, o '{cancel_word}' para salir.")
+
+async def wait_for_text(user, dm, max_length, allow_none=False, cancel_word="cancel"):
+    def check(m):
+        return m.author == user and m.guild is None
+    while True:
+        msg = await bot.wait_for("message", check=check)
+        if msg.content.lower() == cancel_word:
+            return None
+        if allow_none and msg.content.lower() == "none":
+            return ""
+        if len(msg.content) <= max_length:
+            return msg.content
+        await dm.send(f"Texto demasiado largo. Máximo {max_length} caracteres. Escribe '{cancel_word}' para salir.")
+
+# -----------------------------
+# CREAR EMBED
+# -----------------------------
+def create_event_embed(event):
+    embed = discord.Embed(
+        title=event["title"],
+        description=event["description"] or "Sin descripción",
+        color=discord.Color(event.get("color", 0x00ff00))
+    )
+    embed.add_field(name="Canal", value=f"<#{event['channel_id']}>", inline=False)
+    embed.add_field(name="Inicio", value=event["start"], inline=True)
+    embed.add_field(name="Duración / Fin", value=event.get("end") or "No especificado", inline=True)
+
+    # Participantes por rol
+    for key, (emoji, _) in BUTTONS.items():
+        names = event.get("participants_roles", {}).get(key, [])
+        text = ", ".join(names) if names else "Nadie aún"
+        embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
+
+    # Mostrar roles mencionados
+    if event.get("mention_roles"):
+        mentions = " ".join(f"<@&{role_id}>" for role_id in event["mention_roles"])
+        embed.add_field(name="Roles mencionados", value=mentions, inline=False)
+
+    if event.get("image"):
+        embed.set_image(url=event["image"])
+    return embed
+
+# -----------------------------
+# BOTONES DE INSCRIPCIÓN
+# -----------------------------
+class EventButton(discord.ui.Button):
+    def __init__(self, label, emoji, style, event_id, role_key):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.event_id = event_id
+        self.role_key = role_key
+
+    async def callback(self, interaction: discord.Interaction):
+        global events
+        guild_member = interaction.user
+        nickname = guild_member.display_name
+
+        for event in events:
+            if event["id"] == self.event_id:
+                if "participants_roles" not in event:
+                    event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
+
+                # Añadir al rol seleccionado
+                if nickname not in event["participants_roles"][self.role_key]:
+                    event["participants_roles"][self.role_key].append(nickname)
+                    # Quitar de otros roles si no permites multi-respuesta
+                    for key, lst in event["participants_roles"].items():
+                        if key != self.role_key and nickname in lst:
+                            lst.remove(nickname)
+                    save_events(events)
+
+                embed = create_event_embed(event)
+                await interaction.message.edit(embed=embed, view=EventView(self.event_id, event["creator_id"]))
+                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
+                return
+
+# -----------------------------
+# CLASES DE BOTONES Y VISTA
+# -----------------------------
+class EventButton(discord.ui.Button):
+    def __init__(self, label, emoji, style, event_id, role_key):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.event_id = event_id
+        self.role_key = role_key
+
+    async def callback(self, interaction: discord.Interaction):
+        global events
+        nickname = interaction.user.display_name
+
+        for event in events:
+            if event["id"] == self.event_id:
+                if "participants_roles" not in event:
+                    event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
+
+                if nickname not in event["participants_roles"][self.role_key]:
+                    event["participants_roles"][self.role_key].append(nickname)
+                    for key, lst in event["participants_roles"].items():
+                        if key != self.role_key and nickname in lst:
+                            lst.remove(nickname)
+                    save_events(events)
+
+                embed = create_event_embed(event)
+                channel = bot.get_channel(event["channel_id"])
+                if channel and "message_id" in event:
+                    try:
+                        msg = await channel.fetch_message(event["message_id"])
+                        await msg.edit(embed=embed, view=EventView(self.event_id, event["creator_id"]))
+                    except:
+                        pass
+
+                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
+                return
+
+
+class EventActionButton(discord.ui.Button):
+    def __init__(self, label, style, event_id, creator_id):
+        super().__init__(label=label, style=style)
+        self.event_id = event_id
+        self.creator_id = creator_id
+
+    async def callback(self, interaction: discord.Interaction):
+        global events
+        event = next((e for e in events if e["id"] == self.event_id), None)
+        if not event:
+            await interaction.response.send_message("Evento no encontrado.", ephemeral=True)
+            return
+        if interaction.user.id != self.creator_id:
+            await interaction.response.send_message("Solo el creador del evento puede usar este botón.", ephemeral=True)
+            return
+
+        if self.label == "Eliminar evento":
+            events.remove(event)
+            save_events(events)
+
+            channel = bot.get_channel(event["channel_id"])
+            if channel and "message_id" in event:
+                try:
+                    msg = await channel.fetch_message(event["message_id"])
+                    await msg.delete()  # Borra el embed original
+                except discord.NotFound:
+                    pass
+                except discord.Forbidden:
+                    await interaction.response.send_message("No tengo permisos para eliminar el mensaje.", ephemeral=True)
+                    return
+                except Exception as e:
+                    await interaction.response.send_message(f"Ocurrió un error: {e}", ephemeral=True)
+                    return
+
+            await interaction.response.send_message("Evento eliminado ✅", ephemeral=True)
+
+        elif self.label == "Editar evento":
+            await interaction.response.send_message("Te enviaré un DM para editar el evento paso a paso.", ephemeral=True)
+            user = interaction.user
+            dm = await user.create_dm()
+
+            # Valores actuales
+            current_title = event["title"]
+            current_description = event["description"]
+            current_channel_id = event["channel_id"]
+            current_start = event["start"]
+            current_end = event.get("end")
+            current_max = event.get("max_attendees")
+
+            # 1️⃣ Título
+            await dm.send(f"Título actual: **{current_title}**\nEscribe el nuevo título o 'skip' para dejarlo igual:")
+            new_title = await wait_for_text(user, dm, 200, allow_none=True)
+            if new_title is None:
+                await dm.send("Edición cancelada.")
+                return
+            if new_title.lower() != "skip" and new_title != "":
+                event["title"] = new_title
+
+            # 2️⃣ Descripción
+            await dm.send(f"Descripción actual: **{current_description or 'Ninguna'}**\nEscribe la nueva o 'skip':")
+            new_description = await wait_for_text(user, dm, 1600, allow_none=True)
+            if new_description is None:
+                await dm.send("Edición cancelada.")
+                return
+            if new_description.lower() != "skip":
+                event["description"] = new_description
+
+            # 3️⃣ Canal
+            guild = bot.get_guild(GUILD_ID)
+            text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+            await dm.send(f"Canal actual: <#{current_channel_id}>\nSelecciona nuevo canal por número o 'skip':\n" +
+                          "\n".join(f"{i+1}. {c.name}" for i, c in enumerate(text_channels)))
+            chan_option = await wait_for_number(user, dm, 1, len(text_channels))
+            if chan_option is not None:
+                event["channel_id"] = text_channels[chan_option-1].id
+
+            # 4️⃣ Fecha inicio
+            await dm.send(f"Fecha y hora actual: **{current_start}**\nEscribe nueva fecha ('YYYY-MM-DD HH:MM') o 'skip':")
+            while True:
+                msg_time = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
+                if msg_time.content.lower() == "cancelar":
+                    await dm.send("Edición cancelada.")
+                    return
+                if msg_time.content.lower() == "skip":
+                    break
+                try:
+                    start_dt = datetime.strptime(msg_time.content, "%Y-%m-%d %H:%M")
+                    event["start"] = start_dt.strftime("%Y-%m-%d %H:%M")
+                    break
+                except:
+                    await dm.send("Formato inválido. Intenta de nuevo o 'skip'.")
+
+            # 5️⃣ Duración
+            await dm.send(f"Duración actual: **{current_end or 'Ninguna'}**\nEscribe nueva duración o 'skip':")
+            new_duration = await wait_for_text(user, dm, 100, allow_none=True)
+            if new_duration.lower() != "skip":
+                event["end"] = new_duration
+
+            # 6️⃣ Máximo asistentes
+            await dm.send(f"Número máximo de asistentes actual: **{current_max or 'Ninguno'}**\nEscribe nuevo número (1-250) o 'skip':")
+            while True:
+                msg = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
+                if msg.content.lower() == "cancelar":
+                    await dm.send("Edición cancelada.")
+                    return
+                if msg.content.lower() == "skip":
+                    break
+                if msg.content.isdigit() and 1 <= int(msg.content) <= 250:
+                    event["max_attendees"] = int(msg.content)
+                    break
+                await dm.send("Número inválido. Intenta de nuevo o 'skip'.")
+
+            save_events(events)
+
+            # Actualizar embed original
+            channel = bot.get_channel(event["channel_id"])
+            if channel and "message_id" in event:
+                try:
+                    msg = await channel.fetch_message(event["message_id"])
+                    embed = create_event_embed(event)
+                    await msg.edit(embed=embed, view=EventView(event["id"], event["creator_id"]))
+                except:
+                    await channel.send("No se pudo actualizar el evento, enviando uno nuevo...", embed=create_event_embed(event), view=EventView(event["id"], event["creator_id"]))
+
+            await dm.send("Evento editado correctamente ✅")
+
+
+class EventView(discord.ui.View):
+    def __init__(self, event_id, creator_id):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.creator_id = creator_id
+        for role_key, (emoji, style) in BUTTONS.items():
+            self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
+        self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
+        self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+
+
+# -----------------------------
+# VISTA DEL EVENTO
+# -----------------------------
+class EventView(discord.ui.View):
+    def __init__(self, event_id, creator_id):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.creator_id = creator_id
+        for role_key, (emoji, style) in BUTTONS.items():
+            self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
+        self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
+        self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+
+# -----------------------------
+# TAREA DE RECORDATORIOS Y CREACIÓN DE HILO
+# -----------------------------
+@tasks.loop(seconds=60)
+async def check_events():
+    global events
+    now = datetime.now()
+    for event in events:
+        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            continue
+
+        # Recordatorio 15 minutos antes
+        if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
+            mentions = []
+            for role in ["INF", "OFICIAL", "TANQUE", "RECON", "COMANDANTE"]:
+                for name in event["participants_roles"].get(role, []):
+                    member = discord.utils.find(lambda m: m.display_name == name, guild.members)
+                    if member:
+                        mentions.append(member.mention)
+            channel = bot.get_channel(event["channel_id"])
+            if channel:
+                await channel.send(f"Recordatorio! 15 minutos para el inicio del evento.\nParticipantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}")
+                # Crear hilo dentro del canal
+                thread_name = f"Hilo - {event['title']}"
+                thread = await channel.create_thread(name=thread_name, type=discord.ChannelType.public_thread)
+                await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
+            event["reminder_sent"] = True
+            save_events(events)
+
+        # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
+        # if not event.get("channel_created") and now >= start_dt:
+        #     event["channel_created"] = True
+        #     save_events(events)
+
+# -----------------------------
 # COMANDO /ping
 # -----------------------------
 @bot.tree.command(name="ping", description="Responde con Pong!", guild=discord.Object(id=GUILD_ID))
@@ -44,47 +385,6 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="hola", description="Te saluda el bot", guild=discord.Object(id=GUILD_ID))
 async def hola(interaction: discord.Interaction):
     await interaction.response.send_message("👋 Hola! ¿Cómo estás?", ephemeral=True)
-
-# -----------------------------
-# FUNCIONES AUXILIARES PARA INTERACCIÓN POR DM
-# -----------------------------
-async def wait_for_number(user, dm, min_val, max_val, timeout=60):
-    """Espera a que el usuario envíe un número entre min_val y max_val"""
-    try:
-        msg = await bot.wait_for(
-            "message",
-            timeout=timeout,
-            check=lambda m: m.author == user and m.guild is None
-        )
-        if msg.content.lower() == "cancelar":
-            return None
-        if msg.content.isdigit():
-            num = int(msg.content)
-            if min_val <= num <= max_val:
-                return num
-        await dm.send(f"Número inválido. Debe ser entre {min_val} y {max_val}.")
-        return await wait_for_number(user, dm, min_val, max_val, timeout)
-    except:
-        return None
-
-async def wait_for_text(user, dm, max_len, allow_none=False, timeout=120):
-    """Espera a que el usuario envíe un texto de hasta max_len caracteres"""
-    try:
-        msg = await bot.wait_for(
-            "message",
-            timeout=timeout,
-            check=lambda m: m.author == user and m.guild is None
-        )
-        if msg.content.lower() == "cancelar":
-            return None
-        if allow_none and msg.content.lower() == "none":
-            return None
-        if len(msg.content) <= max_len:
-            return msg.content
-        await dm.send(f"Texto demasiado largo, máximo {max_len} caracteres.")
-        return await wait_for_text(user, dm, max_len, allow_none, timeout)
-    except:
-        return None
 
 # -----------------------------
 # COMANDO /eventos
