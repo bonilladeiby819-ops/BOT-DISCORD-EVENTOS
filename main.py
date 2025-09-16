@@ -114,8 +114,8 @@ async def create_event_embed(event):
         color=discord.Color(event.get("color", 0x00ff00))
     )
 
-    embed.add_field(name="📅 Fecha de inicio", value=event.get("start", "No especificado"), inline=False)
-    embed.add_field(name="⏱️ Duración/Fin", value=event.get("end", "No especificado"), inline=False)
+    embed.add_field(name="📅 Fecha de inicio", value=event.get("start", "No especificado"), inline=True)
+    embed.add_field(name="⏱️ Duración/Fin", value=event.get("end", "No especificado"), inline=True)
 
     guild = bot.get_guild(GUILD_ID)
     for key, (emoji, _) in BUTTONS.items():
