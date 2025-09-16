@@ -127,7 +127,7 @@ async def create_event_embed(event):
                 names.append(member.display_name if member else f"❓({uid})")
             field_name = f"{emoji} {key} ({len(user_ids)})"  # número a la par
             text = "\n".join(f"- {n}" for n in names)
-            text = ", ".join(names) if names else "Nadie aún"
+            
         else:
             field_name = f"{emoji} {key} (0)"
             text = "Nadie aún"
