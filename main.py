@@ -251,18 +251,18 @@ class EventButton(discord.ui.Button):
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
-                # Si el usuario no está aún en este rol, lo agregamos
+                # Agregar usuario al rol elegido
                 if nickname not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(nickname)
 
-                # Quitar de otros roles si no permites multi-respuesta
+                # Quitar de otros roles
                 for key, lst in event["participants_roles"].items():
                     if key != self.role_key and nickname in lst:
                         lst.remove(nickname)
 
                 save_events(events)
 
-                # Actualizar el embed principal (con título, desc, etc.)
+                # Actualizar embed principal
                 embed = create_event_embed(event)
                 channel = bot.get_channel(event["channel_id"])
                 if channel and "message_id" in event:
@@ -272,7 +272,7 @@ class EventButton(discord.ui.Button):
                     except:
                         pass
 
-                # Actualizar también el hilo si existe
+                # Actualizar hilo si existe
                 if "thread_id" in event:
                     thread = channel.get_thread(event["thread_id"])
                     if thread:
@@ -295,6 +295,7 @@ class EventButton(discord.ui.Button):
                     ephemeral=True
                 )
                 return
+
 
         if self.label == "Eliminar evento":
             events.remove(event)
