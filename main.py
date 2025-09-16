@@ -251,42 +251,50 @@ class EventButton(discord.ui.Button):
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
-                # Registrar al usuario en el rol seleccionado
+                # Si el usuario no está aún en este rol, lo agregamos
                 if nickname not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(nickname)
 
-                    # Quitar de otros roles si no permites multi-respuesta
-                    for key, lst in event["participants_roles"].items():
-                        if key != self.role_key and nickname in lst:
-                            lst.remove(nickname)
+                # Quitar de otros roles si no permites multi-respuesta
+                for key, lst in event["participants_roles"].items():
+                    if key != self.role_key and nickname in lst:
+                        lst.remove(nickname)
 
-                    # Guardar cambios
-                    save_events(events)
+                save_events(events)
 
-                    # 🔹 Actualizar embed y hilo en tiempo real
-                    await update_event_embed_and_thread(event)
+                # Actualizar el embed principal (con título, desc, etc.)
+                embed = create_event_embed(event)
+                channel = bot.get_channel(event["channel_id"])
+                if channel and "message_id" in event:
+                    try:
+                        msg = await channel.fetch_message(event["message_id"])
+                        await msg.edit(embed=embed, view=EventView(self.event_id, event["creator_id"]))
+                    except:
+                        pass
+
+                # Actualizar también el hilo si existe
+                if "thread_id" in event:
+                    thread = channel.get_thread(event["thread_id"])
+                    if thread:
+                        mentions = []
+                        for role_key, names in event["participants_roles"].items():
+                            if role_key == "DECLINADO":
+                                continue
+                            for name in names:
+                                member = discord.utils.find(
+                                    lambda m: m.display_name == name,
+                                    channel.guild.members
+                                )
+                                if member and member not in mentions:
+                                    mentions.append(member)
+                        if mentions:
+                            await thread.send(f"👥 Nuevos inscritos: {', '.join([m.mention for m in mentions])}")
 
                 await interaction.response.send_message(
-                    f"Te has inscrito como {self.role_key}", ephemeral=True
+                    f"✅ Te has inscrito como **{self.role_key}**",
+                    ephemeral=True
                 )
                 return
-
-
-class EventActionButton(discord.ui.Button):
-    def __init__(self, label, style, event_id, creator_id):
-        super().__init__(label=label, style=style)
-        self.event_id = event_id
-        self.creator_id = creator_id
-
-    async def callback(self, interaction: discord.Interaction):
-        global events
-        event = next((e for e in events if e["id"] == self.event_id), None)
-        if not event:
-            await interaction.response.send_message("Evento no encontrado.", ephemeral=True)
-            return
-        if interaction.user.id != self.creator_id:
-            await interaction.response.send_message("Solo el creador del evento puede usar este botón.", ephemeral=True)
-            return
 
         if self.label == "Eliminar evento":
             events.remove(event)
