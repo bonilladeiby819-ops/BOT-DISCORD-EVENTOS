@@ -198,10 +198,11 @@ class EventButton(discord.ui.Button):
                 if user_id not in event["participants_roles"][self.role_key]:
                    event["participants_roles"][self.role_key].append(user_id)
                     
-                    # Quitar de otros roles si no permites multi-respuesta
-                    for key, lst in event["participants_roles"].items():
-                        if key != self.role_key and nickname in lst:
-                            lst.remove(nickname)
+                # Quitar de otros roles
+                for key, lst in event["participants_roles"].items():
+                    if key != self.role_key and nickname in lst:
+                        lst.remove(nickname)
+
 
                     save_events(events)
                     await update_event_embed_and_thread(event)
