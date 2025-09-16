@@ -446,25 +446,41 @@ async def check_events():
         if not guild:
             continue
 
-        # Recordatorio 15 minutos antes
-        if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
-            mentions = []
-for role_key, user_ids in event.get("participants_roles", {}).items():
-    if role_key == "DECLINADO":
-        continue
-    for user_id in user_ids:
-        member = guild.get_member(user_id)
-        if member and member not in mentions:
-            mentions.append(member)
-            channel = bot.get_channel(event["channel_id"])
-            if channel:
-                await channel.send(f"Recordatorio! 15 minutos para el inicio del evento.\nParticipantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}")
-                # Crear hilo dentro del canal
-                thread_name = f"Hilo - {event['title']}"
-                thread = await channel.create_thread(name=thread_name, type=discord.ChannelType.public_thread)
-                await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
-            event["reminder_sent"] = True
-            save_events(events)
+# Recordatorio 15 minutos antes
+if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
+    mentions = []
+
+    for role_key, user_ids in event.get("participants_roles", {}).items():
+        if role_key == "DECLINADO":
+            continue
+        for user_id in user_ids:
+            member = guild.get_member(user_id)
+            if member and member not in mentions:
+                mentions.append(member.mention)  # 👈 importante usar .mention
+
+    channel = bot.get_channel(event["channel_id"])
+    if channel:
+        # Enviar recordatorio en el canal
+        await channel.send(
+            f"Recordatorio! 15 minutos para el inicio del evento.\n"
+            f"Participantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}"
+        )
+
+        # Crear hilo dentro del canal
+        thread_name = f"Hilo - {event['title']}"
+        thread = await channel.create_thread(
+            name=thread_name,
+            type=discord.ChannelType.public_thread
+        )
+
+        await thread.send(
+            f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}"
+        )
+
+    # Marcar como recordatorio enviado y guardar cambios
+    event["reminder_sent"] = True
+    save_events(events)
+
 
         # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
         # if not event.get("channel_created") and now >= start_dt:
