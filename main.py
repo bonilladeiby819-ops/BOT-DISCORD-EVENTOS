@@ -631,13 +631,13 @@ async def hola(interaction: discord.Interaction):
 )
 async def eventos(interaction: discord.Interaction):
     import uuid
-    from datetime import datetime
 
-    # DM y usuario
     user = interaction.user
     dm = await user.create_dm()
 
-    # ID único del evento
+    await interaction.response.send_message("✅ Evento iniciado. Revisa tus DMs para configurarlo.", ephemeral=True)
+
+    # ID único para el evento
     event_id = str(uuid.uuid4())
 
     # Diccionario base del evento
@@ -645,36 +645,32 @@ async def eventos(interaction: discord.Interaction):
         "id": event_id,
         "title": "Evento sin título",
         "description": "Descripción pendiente",
-        "date": "Fecha pendiente",
+        "start": None,
+        "end": None,
+        "max_attendees": None,
         "participants_roles": {key: [] for key in BUTTONS.keys()},
-        "creator_id": user.id
+        "creator_id": user.id,
+        "channel_id": None,
+        "mention_roles": [],
+        "allowed_roles": [],
+        "multi_response": False,
+        "assign_role": None,
+        "image": None,
+        "color": 0x00FF00,  # Verde por defecto
+        "registration_close": None
     }
-
-    # Crear embed inicial
-    embed = await create_event_embed(event)
-
-    # Enviar embed en el canal donde se ejecutó el comando
-    channel = interaction.channel
-    sent_message = await channel.send(embed=embed, view=EventView(event_id, user.id))
-    event["message_id"] = sent_message.id
-
-    # Guardar en memoria y archivo
-    events.append(event)
-    save_events(events)
-
-    await interaction.response.send_message("✅ Evento creado correctamente. Revisa tus DMs para configurarlo.", ephemeral=True)
 
     # -----------------------------
     # 1️⃣ Canal
     # -----------------------------
     await dm.send("¿Dónde publicar el evento?\n1️⃣ Canal actual\n2️⃣ Otro canal\nEscribe el número o 'cancelar'.")
     option = await wait_for_number(user, dm, 1, 2)
-    if option is None or option == "cancelar":
+    if option is None:
         await dm.send("Creación cancelada.")
         return
 
     if option == 1:
-        channel_id = interaction.channel.id
+        event["channel_id"] = interaction.channel.id
     else:
         guild = bot.get_guild(GUILD_ID)
         text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
@@ -683,8 +679,7 @@ async def eventos(interaction: discord.Interaction):
         if chan_option is None:
             await dm.send("Creación cancelada.")
             return
-        channel_id = text_channels[chan_option - 1].id
-    event["channel_id"] = channel_id
+        event["channel_id"] = text_channels[chan_option - 1].id
 
     # -----------------------------
     # 2️⃣ Título
@@ -701,6 +696,9 @@ async def eventos(interaction: discord.Interaction):
     # -----------------------------
     await dm.send("Ingresa la descripción (máx 1600 caracteres, 'None' para sin descripción):")
     description = await wait_for_text(user, dm, 1600, allow_none=True)
+    if description is None:
+        await dm.send("Creación cancelada.")
+        return
     event["description"] = description or "Sin descripción"
 
     # -----------------------------
@@ -721,7 +719,7 @@ async def eventos(interaction: discord.Interaction):
         await dm.send("Número inválido. Intenta de nuevo.")
 
     # -----------------------------
-    # 5️⃣ Fecha inicio
+    # 5️⃣ Fecha de inicio
     # -----------------------------
     await dm.send("Fecha y hora de inicio ('YYYY-MM-DD HH:MM') o 'ahora':")
     while True:
@@ -747,14 +745,158 @@ async def eventos(interaction: discord.Interaction):
     event["end"] = duration or "No especificada"
 
     # -----------------------------
-    # Guardar y publicar el embed final
+    # 7️⃣ Opciones avanzadas
+    # -----------------------------
+    guild = bot.get_guild(GUILD_ID)
+    roles = [r for r in guild.roles if not r.is_default() and not r.managed]
+
+    while True:
+        await dm.send(
+            "Opciones avanzadas:\n"
+            "1️⃣ Mencionar roles al publicar\n"
+            "2️⃣ Añadir imagen al embed\n"
+            "3️⃣ Cambiar color del evento\n"
+            "4️⃣ Restringir registro a ciertos roles\n"
+            "5️⃣ Permitir múltiples respuestas por usuario\n"
+            "6️⃣ Asignar un rol a los asistentes\n"
+            "7️⃣ Configurar cierre de inscripciones\n"
+            "8️⃣ Finalizar creación del evento\n"
+            "Escribe el número de la opción que quieres configurar, o '8' para finalizar."
+        )
+        option = await wait_for_number(user, dm, 1, 8)
+        if option is None:
+            await dm.send("Creación cancelada.")
+            return
+
+        # --- Opciones avanzadas ---
+        if option == 1:
+            if not roles:
+                await dm.send("No hay roles disponibles para mencionar.")
+                continue
+            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
+            await dm.send("Selecciona roles a mencionar (números separados por coma) o 'none':\n" + roles_text)
+            while True:
+                response = await wait_for_text(user, dm, 200)
+                if response.lower() == "none":
+                    event["mention_roles"] = []
+                    break
+                try:
+                    indices = [int(x.strip())-1 for x in response.split(",")]
+                    selected_roles = [roles[i].id for i in indices if 0 <= i < len(roles)]
+                    if selected_roles:
+                        event["mention_roles"] = selected_roles
+                        break
+                    else:
+                        await dm.send("Ningún rol válido seleccionado. Intenta de nuevo o 'none'.")
+                except:
+                    await dm.send("Entrada inválida. Usa números separados por coma o 'none'.")
+        elif option == 2:
+            await dm.send("Envía la imagen o URL, o 'none':")
+            def check_img(m): return m.author == user and m.guild is None and (m.attachments or m.content)
+            while True:
+                msg_img = await bot.wait_for("message", check=check_img)
+                if msg_img.content.lower() == "cancelar":
+                    await dm.send("Creación cancelada.")
+                    return
+                if msg_img.content.lower() == "none":
+                    break
+                if msg_img.attachments:
+                    attachment = msg_img.attachments[0]
+                    if attachment.content_type.startswith("image/"):
+                        event["image"] = attachment.url
+                        await dm.send("Imagen añadida ✅")
+                        break
+                    else:
+                        await dm.send("El archivo no es una imagen válida.")
+                elif msg_img.content.startswith("http"):
+                    event["image"] = msg_img.content
+                    await dm.send("Imagen añadida ✅")
+                    break
+                else:
+                    await dm.send("Debes enviar un URL válido o subir imagen.")
+        elif option == 3:
+            await dm.send("Escribe color en hexadecimal (ej. FF0000) o 'skip' para verde:")
+            color_hex = await wait_for_text(user, dm, 7, allow_none=True)
+            if color_hex.lower() != "skip":
+                try:
+                    event["color"] = int(color_hex.replace("#",""),16)
+                except:
+                    await dm.send("Color inválido, se usará verde por defecto.")
+        elif option == 4:
+            if not roles:
+                await dm.send("No hay roles disponibles.")
+                continue
+            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
+            await dm.send("Selecciona roles permitidos (números separados por coma) o 'none':\n" + roles_text)
+            while True:
+                response = await wait_for_text(user, dm, 200)
+                if response.lower() == "none":
+                    event["allowed_roles"] = []
+                    break
+                try:
+                    indices = [int(x.strip())-1 for x in response.split(",")]
+                    allowed_roles = [roles[i].id for i in indices if 0 <= i < len(roles)]
+                    if allowed_roles:
+                        event["allowed_roles"] = allowed_roles
+                        break
+                    else:
+                        await dm.send("Ningún rol válido. Intenta de nuevo o 'none'.")
+                except:
+                    await dm.send("Entrada inválida.")
+        elif option == 5:
+            await dm.send("Permitir múltiples roles por usuario? (si/no)")
+            multi = await wait_for_text(user, dm, 3)
+            event["multi_response"] = multi.lower() == "si"
+        elif option == 6:
+            if not roles:
+                await dm.send("No hay roles disponibles.")
+                continue
+            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
+            await dm.send("Selecciona rol a asignar automáticamente o 'none':\n" + roles_text)
+            while True:
+                response = await wait_for_text(user, dm, 100)
+                if response.lower() == "none":
+                    event["assign_role"] = None
+                    break
+                try:
+                    idx = int(response.strip())-1
+                    if 0 <= idx < len(roles):
+                        event["assign_role"] = roles[idx].id
+                        break
+                    else:
+                        await dm.send("Número inválido.")
+                except:
+                    await dm.send("Entrada inválida.")
+        elif option == 7:
+            await dm.send("Hora cierre inscripciones ('YYYY-MM-DD HH:MM') o 'none':")
+            while True:
+                msg_close = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
+                if msg_close.content.lower() == "none":
+                    event["registration_close"] = None
+                    break
+                try:
+                    dt_close = datetime.strptime(msg_close.content, "%Y-%m-%d %H:%M")
+                    event["registration_close"] = dt_close.strftime("%Y-%m-%d %H:%M")
+                    break
+                except:
+                    await dm.send("Formato inválido o 'none'.")
+        elif option == 8:
+            break
+
+    # -----------------------------
+    # Publicar embed final en canal
     # -----------------------------
     channel = bot.get_channel(event["channel_id"])
     embed = await create_event_embed(event)
-    await channel.send(embed=embed, view=EventView(event_id, user.id))
+    sent_message = await channel.send(embed=embed, view=EventView(event_id, user.id))
+    event["message_id"] = sent_message.id
+
+    # Guardar evento final
+    events.append(event)
     save_events(events)
 
-    await dm.send("✅ Evento publicado correctamente!")
+    await dm.send("✅ Evento creado y publicado correctamente en el canal.")
+
     # -----------------------------
     # 🔧 Parches para los errores
     # -----------------------------
