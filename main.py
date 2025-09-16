@@ -44,7 +44,46 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="hola", description="Te saluda el bot", guild=discord.Object(id=GUILD_ID))
 async def hola(interaction: discord.Interaction):
     await interaction.response.send_message("👋 Hola! ¿Cómo estás?", ephemeral=True)
+# -----------------------------
+# FUNCIONES AUXILIARES PARA INTERACCIÓN POR DM
+# -----------------------------
+async def wait_for_number(user, dm, min_val, max_val, timeout=60):
+    """Espera a que el usuario envíe un número entre min_val y max_val"""
+    try:
+        msg = await bot.wait_for(
+            "message",
+            timeout=timeout,
+            check=lambda m: m.author == user and m.guild is None
+        )
+        if msg.content.lower() == "cancelar":
+            return None
+        if msg.content.isdigit():
+            num = int(msg.content)
+            if min_val <= num <= max_val:
+                return num
+        await dm.send(f"Número inválido. Debe ser entre {min_val} y {max_val}.")
+        return await wait_for_number(user, dm, min_val, max_val, timeout)
+    except:
+        return None
 
+async def wait_for_text(user, dm, max_len, allow_none=False, timeout=120):
+    """Espera a que el usuario envíe un texto de hasta max_len caracteres"""
+    try:
+        msg = await bot.wait_for(
+            "message",
+            timeout=timeout,
+            check=lambda m: m.author == user and m.guild is None
+        )
+        if msg.content.lower() == "cancelar":
+            return None
+        if allow_none and msg.content.lower() == "none":
+            return None
+        if len(msg.content) <= max_len:
+            return msg.content
+        await dm.send(f"Texto demasiado largo, máximo {max_len} caracteres.")
+        return await wait_for_text(user, dm, max_len, allow_none, timeout)
+    except:
+        return None
 # -----------------------------
 # COMANDO /eventos
 # -----------------------------
