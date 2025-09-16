@@ -624,7 +624,11 @@ async def hola(interaction: discord.Interaction):
 # -----------------------------
 # COMANDO /eventos
 # -----------------------------
-@bot.tree.command(name="eventos", description="Crear un evento paso a paso"(id=GUILD_ID))
+@bot.tree.command(
+    name="eventos",
+    description="Crear un evento paso a paso",
+    guild=discord.Object(id=GUILD_ID)
+)
 async def eventos(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)  # Dice a Discord "espera"
     await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
