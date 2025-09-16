@@ -524,10 +524,11 @@ async def send_event_reminder(event):
             if member and member not in mentions:
                 mentions.append(member)
 
-    # Enviar embed en el canal
+    # Enviar embed en el canal principal
     await channel.send(embed=reminder_embed)
 
     # Crear hilo si no existe
+    thread = None
     if "thread_id" not in event:
         thread = await channel.create_thread(
             name=f"Hilo - {event['title']}",
@@ -536,13 +537,15 @@ async def send_event_reminder(event):
         event["thread_id"] = thread.id
         save_events(events)
     else:
-        thread = await bot.get_channel(event["thread_id"])
+        thread = bot.get_channel(event["thread_id"])
 
-    # Enviar mensaje de bienvenida en el hilo con menciones
+    # Mensaje dentro del hilo
     if thread:
-        await thread.send(
-    f"¡Bienvenidos al evento! {', '.join(m.mention for m in mentions) if mentions else 'No hay participantes aún.'}",
-    allowed_mentions=discord.AllowedMentions(users=True))  # Esto permite mencionar usuarios
+        if mentions:
+            await thread.send(f"¡Bienvenidos al evento! {' '.join([m.mention for m in mentions])}")
+        else:
+            await thread.send("¡Bienvenidos al evento! No hay participantes aún.")
+
 
 
     # Enviar DM a cada participante
