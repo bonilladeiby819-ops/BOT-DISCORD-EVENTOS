@@ -192,7 +192,7 @@ class EventButton(discord.ui.Button):
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
-                # Agregar al rol seleccionado si no está ya inscrito
+                # Registrar al usuario en el rol seleccionado
                 if nickname not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(nickname)
 
@@ -204,23 +204,12 @@ class EventButton(discord.ui.Button):
                     # Guardar cambios
                     save_events(events)
 
-                    # Actualizar embed y hilo en tiempo real
+                    # 🔹 Actualizar embed y hilo en tiempo real
                     await update_event_embed_and_thread(event)
 
-                # Responder al usuario
-                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
-                return
-
-                embed = create_event_embed(event)
-                channel = bot.get_channel(event["channel_id"])
-                if channel and "message_id" in event:
-                    try:
-                        msg = await channel.fetch_message(event["message_id"])
-                        await msg.edit(embed=embed, view=EventView(self.event_id, event["creator_id"]))
-                    except:
-                        pass
-
-                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
+                await interaction.response.send_message(
+                    f"Te has inscrito como {self.role_key}", ephemeral=True
+                )
                 return
 
 
