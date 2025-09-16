@@ -188,8 +188,8 @@ class EventButton(discord.ui.Button):
 
 async def callback(self, interaction: discord.Interaction):
     global events
-    nickname = interaction.user.display_name
     user_id = interaction.user.id
+    nickname = interaction.user.display_name
 
     for event in events:
         if event["id"] == self.event_id:
@@ -223,19 +223,28 @@ class EventActionButton(discord.ui.Button):
         self.creator_id = creator_id
 
     async def callback(self, interaction: discord.Interaction):
-        # Lógica de editar/eliminar aquí...
-        pass
+        global events
+        event = next((e for e in events if e["id"] == self.event_id), None)
+        if not event:
+            await interaction.response.send_message("Evento no encontrado.", ephemeral=True)
+            return
 
+        if self.label == "Eliminar evento":
+            events.remove(event)
+            save_events(events)
+            channel = bot.get_channel(event["channel_id"])
+            if channel and "message_id" in event:
+                try:
+                    msg = await channel.fetch_message(event["message_id"])
+                    await msg.delete()
+                except:
+                    pass
+            await interaction.response.send_message("Evento eliminado ✅", ephemeral=True)
 
-class EventView(discord.ui.View):
-    def __init__(self, event_id, creator_id):
-        super().__init__(timeout=None)
-        self.event_id = event_id
-        self.creator_id = creator_id
-        for role_key, (emoji, style) in BUTTONS.items():
-            self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
-        self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
-        self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+        elif self.label == "Editar evento":
+            await interaction.response.send_message("Te enviaré un DM para editar el evento.", ephemeral=True)
+            # Aquí va tu flujo de edición existente
+
 
 # -----------------------------
 # CLASES DE BOTONES Y VISTA
@@ -248,7 +257,7 @@ class EventButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         global events
-        nickname = interaction.user.display_name
+        user_id = interaction.user.id  # <- Cambiado de display_name a user.id
 
         for event in events:
             if event["id"] == self.event_id:
@@ -256,13 +265,14 @@ class EventButton(discord.ui.Button):
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
                 # Agregar usuario al rol elegido
-                if nickname not in event["participants_roles"][self.role_key]:
-                    event["participants_roles"][self.role_key].append(nickname)
+                if user_id not in event["participants_roles"][self.role_key]:
+                    event["participants_roles"][self.role_key].append(user_id)
 
-                # Quitar de otros roles
-                for key, lst in event["participants_roles"].items():
-                    if key != self.role_key and nickname in lst:
-                        lst.remove(nickname)
+                # Quitar de otros roles si no es multi-respuesta
+                if not event.get("multi_response", False):
+                    for key, lst in event["participants_roles"].items():
+                        if key != self.role_key and user_id in lst:
+                            lst.remove(user_id)
 
                 save_events(events)
 
@@ -281,14 +291,11 @@ class EventButton(discord.ui.Button):
                     thread = channel.get_thread(event["thread_id"])
                     if thread:
                         mentions = []
-                        for role_key, names in event["participants_roles"].items():
+                        for role_key, user_ids in event["participants_roles"].items():
                             if role_key == "DECLINADO":
                                 continue
-                            for name in names:
-                                member = discord.utils.find(
-                                    lambda m: m.display_name == name,
-                                    channel.guild.members
-                                )
+                            for uid in user_ids:
+                                member = channel.guild.get_member(uid)
                                 if member and member not in mentions:
                                     mentions.append(member)
                         if mentions:
@@ -299,6 +306,7 @@ class EventButton(discord.ui.Button):
                     ephemeral=True
                 )
                 return
+
 
 
         if self.label == "Eliminar evento":
@@ -686,14 +694,18 @@ async def eventos(interaction: discord.Interaction):
     while True:
         msg_time = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
         if msg_time.content.lower() == "cancelar":
-            await dm.send("Creación cancelada.")
-            return
+           await dm.send("Creación cancelada.")
+           return
+        if msg_time.content.lower() == "ahora":
+           start_dt = datetime.now()
+           break
         try:
-            start_dt = datetime.now() if msg_time.content.lower() == "ahora" else datetime.strptime(msg_time.content, "%Y-%m-%d %H:%M")
+            start_dt = datetime.strptime(msg_time.content, "%Y-%m-%d %H:%M")
             break
         except:
-            await dm.send("Formato inválido. Intenta de nuevo.")
-    event["start"] = start_dt.strftime("%Y-%m-%d %H:%M")
+            await dm.send("Formato inválido. Intenta de nuevo.")  # ✅ indentado dentro del except
+        event["start"] = start_dt.strftime("%Y-%m-%d %H:%M")
+
 
     # -----------------------------
     # 6️⃣ Duración
