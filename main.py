@@ -472,41 +472,43 @@ async def check_events():
 
         # Recordatorio 15 minutos antes
         if not event.get("reminder_sent") and start_dt - timedelta(minutes=15) <= now < start_dt:
+            # Preparar menciones de todos los participantes (excepto DECLINADO)
             mentions = []
-
             for role_key, user_ids in event.get("participants_roles", {}).items():
                 if role_key == "DECLINADO":
                     continue
                 for user_id in user_ids:
                     member = guild.get_member(user_id)
                     if member and member not in mentions:
-                        mentions.append(member.mention)  # 👈 ahora sí menciona al usuario
+                        mentions.append(member.mention)
 
             channel = bot.get_channel(event["channel_id"])
             if channel:
                 # Enviar recordatorio en el canal
-                await channel.send(
+                message = await channel.send(
                     f"⏰ Recordatorio! 15 minutos para el inicio del evento.\n"
                     f"Participantes: {', '.join(mentions) if mentions else 'Nadie registrado aún.'}"
                 )
 
-                # Crear hilo dentro del canal
-                thread_name = f"Hilo - {event['title']}"
-                thread = await channel.create_thread(
-                    name=thread_name,
-                    type=discord.ChannelType.public_thread
-                )
+                # Crear hilo a partir del mensaje
+                thread_name = f"Hilo de {event.get('name', 'Evento')}"
+                thread = await message.create_thread(name=thread_name, auto_archive_duration=60)
 
-                await thread.send(
-                    f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}"
-                )
+                # Menciones de los confirmados
+                confirmed_ids = event.get("participants_roles", {}).get("✅ Confirmado", [])
+                confirmed_members = [guild.get_member(uid) for uid in confirmed_ids]
+                confirmed_mentions = [member.mention for member in confirmed_members if member]
+
+                # Enviar mensaje de bienvenida en el hilo
+                welcome_msg = f"👋 Bienvenidos al evento **{event.get('name', 'Evento')}**\nEstá por iniciar, prepárense!"
+                if confirmed_mentions:
+                    welcome_msg += f"\n\n{' '.join(confirmed_mentions)}"
+
+                await thread.send(welcome_msg)
 
             # Marcar como recordatorio enviado y guardar cambios
             event["reminder_sent"] = True
             save_events(events)
-
-
-
 
         # Si quieres hacer algo justo al inicio del evento, puedes usar esta sección:
         # if not event.get("channel_created") and now >= start_dt:
