@@ -2,10 +2,12 @@
 import os
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+import json
 import uuid
-import json 
+from keep_alive import keep_alive  # Para Koyeb u otros hosts
 
 # -----------------------------
 # CARGAR VARIABLES DE ENTORNO
@@ -18,8 +20,8 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 # CONFIGURACIÓN DEL BOT
 # -----------------------------
 intents = discord.Intents.default()
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 # -----------------------------
 # EVENTO ON_READY
 # -----------------------------
@@ -33,10 +35,11 @@ async def on_ready():
         print(f"❌ Error al sincronizar: {e}")
 
     print(f"✅ Bot conectado como {bot.user}")
-     # Iniciar el loop de recordatorios solo si no está corriendo
+
+    # Iniciar el loop de recordatorios solo si no está corriendo
     if not check_event_reminders.is_running():
         check_event_reminders.start()
-    
+
 
 # -----------------------------
 # ARCHIVO DE EVENTOS
@@ -74,6 +77,9 @@ events = load_events()
 # -----------------------------
 # ESPERA POR MENSAJES
 # -----------------------------
+# -----------------------------
+# FUNCIONES AUXILIARES
+# -----------------------------
 async def wait_for_number(user, dm, min_val, max_val, cancel_word="cancelar"):
     def check(m):
         return m.author == user and m.guild is None
@@ -85,7 +91,7 @@ async def wait_for_number(user, dm, min_val, max_val, cancel_word="cancelar"):
             return int(msg.content)
         await dm.send(f"Introduce un número entre {min_val} y {max_val}, o '{cancel_word}' para salir.")
 
-async def wait_for_text(user, dm, max_length, allow_none=False, cancel_word="cancel"):
+async def wait_for_text(user, dm, max_length, allow_none=False, cancel_word="cancelar"):
     def check(m):
         return m.author == user and m.guild is None
     while True:
@@ -99,60 +105,41 @@ async def wait_for_text(user, dm, max_length, allow_none=False, cancel_word="can
         await dm.send(f"Texto demasiado largo. Máximo {max_length} caracteres. Escribe '{cancel_word}' para salir.")
 
 # -----------------------------
-# CREAR EMBED
+# CREAR EMBED DE EVENTO
 # -----------------------------
 async def create_event_embed(event):
     embed = discord.Embed(
-        title=event["title"],
-        description=event["description"] or "Sin descripción",
+        title=event.get("title", "Evento sin título"),
+        description=event.get("description", "Sin descripción"),
         color=discord.Color(event.get("color", 0x00ff00))
     )
 
-    embed.add_field(name="Canal", value=f"<#{event['channel_id']}>", inline=False)
-
-    # ✅ Manejo seguro de "start"
-    start_str = event.get("start")
-    if start_str:
-        try:
-            start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M")
-            timestamp = int(start_dt.timestamp())
-            start_str = f"<t:{timestamp}:F>"
-        except Exception:
-            # Si no cumple el formato, mostrarlo tal cual
-            start_str = start_str
-    else:
-        start_str = "No especificado"
-
-    embed.add_field(name="Inicio", value=start_str, inline=True)
-    embed.add_field(name="Duración / Fin", value=event.get("end") or "No especificado", inline=True)
+    embed.add_field(name="📅 Fecha de inicio", value=event.get("start", "No especificado"), inline=False)
+    embed.add_field(name="⏱️ Duración/Fin", value=event.get("end", "No especificado"), inline=False)
 
     guild = bot.get_guild(GUILD_ID)
-
-        # Participantes
     for key, (emoji, _) in BUTTONS.items():
         user_ids = event.get("participants_roles", {}).get(key, [])
-        if user_ids:    
+        if user_ids:
             names = []
             for uid in user_ids:
-                try:
-                    member = await guild.fetch_member(uid)  # Fuerza a obtener el miembro desde Discord
-                    names.append(member.display_name)
-                except:
-                    names.append(f"❓({uid})")
+                member = guild.get_member(uid) if guild else None
+                names.append(member.display_name if member else f"❓({uid})")
             text = f"({len(user_ids)})\n" + "\n".join(f"- {n}" for n in names)
         else:
             text = "Nadie aún"
         embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
 
-    # Roles mencionados
+    # Menciones de roles
     if event.get("mention_roles"):
-        mentions = " ".join(f"<@&{role_id}>" for role_id in event["mention_roles"])
+        mentions = " ".join(f"<@&{r}>" for r in event["mention_roles"])
         embed.add_field(name="Roles mencionados", value=mentions, inline=False)
 
     if event.get("image"):
         embed.set_image(url=event["image"])
 
     return embed
+
 
 
 # -----------------------------
@@ -262,7 +249,6 @@ class EventActionButton(discord.ui.Button):
             await interaction.response.send_message("Te enviaré un DM para editar el evento.", ephemeral=True)
             # Aquí va tu flujo de edición existente
 
-
 # -----------------------------
 # CLASES DE BOTONES Y VISTA
 # -----------------------------
@@ -275,14 +261,14 @@ class EventButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         global events
         user_id = interaction.user.id
-        channel = interaction.channel  # ✅ ahora tienes el canal
+        channel = interaction.channel
 
         for event in events:
             if event["id"] == self.event_id:
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
-                # Agregar usuario al rol elegido
+                # Agregar usuario al rol seleccionado
                 if user_id not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(user_id)
 
@@ -294,12 +280,10 @@ class EventButton(discord.ui.Button):
 
                 save_events(events)
 
-                # ✅ Embed actualizado
+                # Crear embed actualizado
                 embed = await create_event_embed(event)
 
-                # ✅ Aquí corregido: usamos self.event_id y interaction.user
-                await channel.send(embed=embed, view=EventView(self.event_id, interaction.user.id))
-
+                # Actualizar mensaje original
                 if channel and "message_id" in event:
                     try:
                         msg = await channel.fetch_message(event["message_id"])
@@ -309,7 +293,7 @@ class EventButton(discord.ui.Button):
 
                 # Actualizar hilo si existe
                 if "thread_id" in event:
-                    thread = channel.get_thread(event["thread_id"])
+                    thread = channel.guild.get_channel(event["thread_id"])
                     if thread:
                         mentions = []
                         for role_key, user_ids in event["participants_roles"].items():
@@ -317,10 +301,10 @@ class EventButton(discord.ui.Button):
                                 continue
                             for uid in user_ids:
                                 member = channel.guild.get_member(uid)
-                                if member and member not in mentions:
-                                    mentions.append(member)
+                                if member:
+                                    mentions.append(member.mention)
                         if mentions:
-                            await thread.send(f"👥 Nuevos inscritos: {', '.join([m.mention for m in mentions])}")
+                            await thread.send(f"👥 Nuevos inscritos: {', '.join(mentions)}")
 
                 await interaction.response.send_message(
                     f"✅ Te has inscrito como **{self.role_key}**",
@@ -328,15 +312,14 @@ class EventButton(discord.ui.Button):
                 )
                 return
 
+        # Acciones de botón especiales
         if self.label == "Eliminar evento":
             events.remove(event)
             save_events(events)
-
-            channel = bot.get_channel(event["channel_id"])
             if channel and "message_id" in event:
                 try:
                     msg = await channel.fetch_message(event["message_id"])
-                    await msg.delete()  # Borra el embed original
+                    await msg.delete()
                 except discord.NotFound:
                     pass
                 except discord.Forbidden:
@@ -345,7 +328,6 @@ class EventButton(discord.ui.Button):
                 except Exception as e:
                     await interaction.response.send_message(f"Ocurrió un error: {e}", ephemeral=True)
                     return
-
             await interaction.response.send_message("Evento eliminado ✅", ephemeral=True)
 
         elif self.label == "Editar evento":
@@ -431,10 +413,12 @@ class EventButton(discord.ui.Button):
             if channel and "message_id" in event:
                 try:
                     msg = await channel.fetch_message(event["message_id"])
-                    embed = create_event_embed(event)
+                    embed = await create_event_embed(event)
                     await msg.edit(embed=embed, view=EventView(event["id"], event["creator_id"]))
                 except:
-                    await channel.send("No se pudo actualizar el evento, enviando uno nuevo...", embed=create_event_embed(event), view=EventView(event["id"], event["creator_id"]))
+                    await channel.send("No se pudo actualizar el evento, enviando uno nuevo...",
+                                       embed=await create_event_embed(event),
+                                       view=EventView(event["id"], event["creator_id"]))
 
             await dm.send("Evento editado correctamente ✅")
 
@@ -446,8 +430,9 @@ class EventView(discord.ui.View):
         self.creator_id = creator_id
         for role_key, (emoji, style) in BUTTONS.items():
             self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
-        self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
-        self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+        self.add_item(EventButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
+        self.add_item(EventButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+
 
 
 # -----------------------------
@@ -646,34 +631,50 @@ async def hola(interaction: discord.Interaction):
 )
 async def eventos(interaction: discord.Interaction):
     import uuid
-    event_id = str(uuid.uuid4())   # ✅ se crea primero
-    event = {}                     # ✅ el diccionario también antes de usarlo
+    from datetime import datetime
 
-    embed = await create_event_embed(event)  # ahora sí existe event y event_id
-
-    channel = interaction.channel  # canal donde se publicará
-    await channel.send(embed=embed, view=EventView(event_id, interaction.user.id))
-
-    await interaction.response.send_message("Evento creado ✅", ephemeral=True)
-
-    await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
-
+    # DM y usuario
     user = interaction.user
     dm = await user.create_dm()
 
+    # ID único del evento
+    event_id = str(uuid.uuid4())
+
+    # Diccionario base del evento
+    event = {
+        "id": event_id,
+        "title": "Evento sin título",
+        "description": "Descripción pendiente",
+        "date": "Fecha pendiente",
+        "participants_roles": {key: [] for key in BUTTONS.keys()},
+        "creator_id": user.id
+    }
+
+    # Crear embed inicial
+    embed = await create_event_embed(event)
+
+    # Enviar embed en el canal donde se ejecutó el comando
+    channel = interaction.channel
+    sent_message = await channel.send(embed=embed, view=EventView(event_id, user.id))
+    event["message_id"] = sent_message.id
+
+    # Guardar en memoria y archivo
+    events.append(event)
+    save_events(events)
+
+    await interaction.response.send_message("✅ Evento creado correctamente. Revisa tus DMs para configurarlo.", ephemeral=True)
 
     # -----------------------------
     # 1️⃣ Canal
     # -----------------------------
     await dm.send("¿Dónde publicar el evento?\n1️⃣ Canal actual\n2️⃣ Otro canal\nEscribe el número o 'cancelar'.")
     option = await wait_for_number(user, dm, 1, 2)
-    if option is None:
+    if option is None or option == "cancelar":
         await dm.send("Creación cancelada.")
         return
 
     if option == 1:
-        channel_id = interaction.channel_id
+        channel_id = interaction.channel.id
     else:
         guild = bot.get_guild(GUILD_ID)
         text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
@@ -700,9 +701,6 @@ async def eventos(interaction: discord.Interaction):
     # -----------------------------
     await dm.send("Ingresa la descripción (máx 1600 caracteres, 'None' para sin descripción):")
     description = await wait_for_text(user, dm, 1600, allow_none=True)
-    if description is None:
-        await dm.send("Creación cancelada.")
-        return
     event["description"] = description or "Sin descripción"
 
     # -----------------------------
@@ -715,13 +713,12 @@ async def eventos(interaction: discord.Interaction):
             await dm.send("Creación cancelada.")
             return
         if msg.content.lower() == "none":
-            max_attendees = None
+            event["max_attendees"] = None
             break
         if msg.content.isdigit() and 1 <= int(msg.content) <= 250:
-            max_attendees = int(msg.content)
+            event["max_attendees"] = int(msg.content)
             break
         await dm.send("Número inválido. Intenta de nuevo.")
-    event["max_attendees"] = max_attendees
 
     # -----------------------------
     # 5️⃣ Fecha inicio
@@ -750,151 +747,14 @@ async def eventos(interaction: discord.Interaction):
     event["end"] = duration or "No especificada"
 
     # -----------------------------
-    # 7️⃣ Opciones avanzadas
+    # Guardar y publicar el embed final
     # -----------------------------
-    guild = bot.get_guild(GUILD_ID)
-    roles = [r for r in guild.roles if not r.is_default() and not r.managed]
+    channel = bot.get_channel(event["channel_id"])
+    embed = await create_event_embed(event)
+    await channel.send(embed=embed, view=EventView(event_id, user.id))
+    save_events(events)
 
-    while True:
-        await dm.send(
-            "Opciones avanzadas:\n"
-            "1️⃣ Mencionar roles al publicar\n"
-            "2️⃣ Añadir imagen al embed\n"
-            "3️⃣ Cambiar color del evento\n"
-            "4️⃣ Restringir registro a ciertos roles\n"
-            "5️⃣ Permitir múltiples respuestas por usuario\n"
-            "6️⃣ Asignar un rol a los asistentes\n"
-            "7️⃣ Configurar cierre de inscripciones\n"
-            "8️⃣ Finalizar creación del evento\n"
-            "Escribe el número de la opción que quieres configurar, o '8' para finalizar."
-        )
-        option = await wait_for_number(user, dm, 1, 8)
-        if option is None:
-            await dm.send("Creación cancelada.")
-            return
-
-        if option == 1:  # Mencionar roles
-            if not roles:
-                await dm.send("No hay roles disponibles para mencionar.")
-                continue
-            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
-            await dm.send("Selecciona los roles a mencionar escribiendo sus números separados por comas, o 'none':\n" + roles_text)
-            while True:
-                response = await wait_for_text(user, dm, 200)
-                if response.lower() == "none":
-                    event["mention_roles"] = []
-                    break
-                try:
-                    indices = [int(x.strip()) - 1 for x in response.split(",")]
-                    selected_roles = [roles[i].id for i in indices if 0 <= i < len(roles)]
-                    if selected_roles:
-                        event["mention_roles"] = selected_roles
-                        break
-                    else:
-                        await dm.send("Ningún rol válido seleccionado. Intenta de nuevo o 'none'.")
-                except:
-                    await dm.send("Entrada inválida. Escribe los números separados por comas o 'none'.")
-
-        elif option == 2:  # Imagen
-            await dm.send("Envía la imagen o un URL, o escribe 'none' para omitir:")
-            def check_img(m): return m.author == user and m.guild is None and (m.attachments or m.content)
-            while True:
-                msg_img = await bot.wait_for("message", check=check_img)
-                if msg_img.content.lower() == "cancelar":
-                    await dm.send("Creación cancelada.")
-                    return
-                if msg_img.content.lower() == "none":
-                    break
-                if msg_img.attachments:
-                    attachment = msg_img.attachments[0]
-                    if attachment.content_type.startswith("image/"):
-                        event["image"] = attachment.url
-                        await dm.send("Imagen añadida correctamente ✅")
-                        break
-                    else:
-                        await dm.send("El archivo no es una imagen válida.")
-                elif msg_img.content.startswith("http"):
-                    event["image"] = msg_img.content
-                    await dm.send("Imagen añadida correctamente ✅")
-                    break
-                else:
-                    await dm.send("Debes enviar un URL válido o subir una imagen directamente.")
-
-        elif option == 3:  # Color
-            await dm.send("Escribe el color en hexadecimal (ej. FF0000) o 'skip' para dejarlo verde:")
-            color_hex = await wait_for_text(user, dm, 7, allow_none=True)
-            if color_hex.lower() != "skip":
-                try:
-                    color_str = color_hex.replace("#", "")
-                    event["color"] = int(color_str, 16)
-                except ValueError:
-                    await dm.send("Color inválido, se usará verde por defecto.")
-
-        elif option == 4:  # Roles permitidos
-            if not roles:
-                await dm.send("No hay roles disponibles.")
-                continue
-            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
-            await dm.send("Selecciona los roles permitidos escribiendo sus números separados por comas, o 'none':\n" + roles_text)
-            while True:
-                response = await wait_for_text(user, dm, 200)
-                if response.lower() == "none":
-                    event["allowed_roles"] = []
-                    break
-                try:
-                    indices = [int(x.strip()) - 1 for x in response.split(",")]
-                    allowed_roles = [roles[i].id for i in indices if 0 <= i < len(roles)]
-                    if allowed_roles:
-                        event["allowed_roles"] = allowed_roles
-                        break
-                    else:
-                        await dm.send("Ningún rol válido. Intenta de nuevo o 'none'.")
-                except:
-                    await dm.send("Entrada inválida. Intenta de nuevo.")
-
-        elif option == 5:  # Multi-respuesta
-            await dm.send("Permitir que un usuario elija múltiples roles? (si/no)")
-            multi = await wait_for_text(user, dm, 3)
-            event["multi_response"] = True if multi.lower() == "si" else False
-
-        elif option == 6:  # Rol asignado automáticamente
-            if not roles:
-                await dm.send("No hay roles disponibles.")
-                continue
-            roles_text = "\n".join(f"{i+1}. {r.name}" for i, r in enumerate(roles))
-            await dm.send("Selecciona el rol que se asignará automáticamente a los asistentes o 'none':\n" + roles_text)
-            while True:
-                response = await wait_for_text(user, dm, 100)
-                if response.lower() == "none":
-                    event["assign_role"] = None
-                    break
-                try:
-                    index = int(response.strip()) - 1
-                    if 0 <= index < len(roles):
-                        event["assign_role"] = roles[index].id
-                        break
-                    else:
-                        await dm.send("Número inválido. Intenta de nuevo.")
-                except:
-                    await dm.send("Entrada inválida. Intenta de nuevo.")
-
-        elif option == 7:  # Cierre de inscripciones
-            await dm.send("Hora de cierre de inscripciones ('YYYY-MM-DD HH:MM') o 'none':")
-            while True:
-                msg_close = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
-                if msg_close.content.lower() == "none":
-                    event["registration_close"] = None
-                    break
-                try:
-                    dt_close = datetime.strptime(msg_close.content, "%Y-%m-%d %H:%M")
-                    event["registration_close"] = dt_close.strftime("%Y-%m-%d %H:%M")
-                    break
-                except:
-                    await dm.send("Formato inválido. Intenta de nuevo o 'none'.")
-
-        elif option == 8:  # Finalizar
-            break
-    
+    await dm.send("✅ Evento publicado correctamente!")
     # -----------------------------
     # 🔧 Parches para los errores
     # -----------------------------
@@ -934,15 +794,32 @@ async def eventos(interaction: discord.Interaction):
     # -----------------------------
     # Crear el embed y enviar
     # -----------------------------
-    channel = bot.get_channel(event["channel_id"])
-    if channel:
-        embed = create_event_embed(event)
-        sent_message = await channel.send(embed=embed, view=EventView(event_id, user.id))
-        event["message_id"] = sent_message.id
-        save_events(events)
-        await dm.send(f"Evento creado correctamente en <#{channel.id}>")
-    else:
-        await dm.send("No se pudo enviar el evento al canal, pero se guardó en la base de datos.")
+    
+async def create_event_embed(event):
+    embed = discord.Embed(
+        title=event.get("title", "Evento sin título"),
+        description=event.get("description", "Sin descripción"),
+        color=discord.Color.green()
+    )
+
+    embed.add_field(name="📅 Fecha", value=event.get("date", "Por definir"), inline=False)
+
+    # Mostrar los participantes por cada botón/rol
+    guild = bot.get_guild(GUILD_ID)
+    for key, emoji in BUTTONS.items():
+        user_ids = event.get("participants_roles", {}).get(key, [])
+        if user_ids:
+            names = []
+            for uid in user_ids:
+                member = guild.get_member(uid) if guild else None
+                names.append(member.display_name if member else f"❓({uid})")
+            text = f"({len(user_ids)})\n" + "\n".join(f"- {n}" for n in names)
+        else:
+            text = "Nadie aún"
+
+        embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
+
+    return embed
 
 # -----------------------------
 # COMANDO /proximos_eventos_visual
