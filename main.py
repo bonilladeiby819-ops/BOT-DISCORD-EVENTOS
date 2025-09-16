@@ -110,28 +110,25 @@ def create_event_embed(event):
     
     embed.add_field(name="Canal", value=f"<#{event['channel_id']}>", inline=False)
     
-    # Convertir la hora a timestamp de Discord
     try:
         start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
         timestamp = int(start_dt.timestamp())
-        start_str = f"<t:{timestamp}:F>"  # Formato completo
+        start_str = f"<t:{timestamp}:F>"
     except:
         start_str = event["start"]
     
     embed.add_field(name="Inicio", value=start_str, inline=True)
     embed.add_field(name="Duración / Fin", value=event.get("end") or "No especificado", inline=True)
 
-    # Participantes por rol
     for key, (emoji, _) in BUTTONS.items():
         names = event.get("participants_roles", {}).get(key, [])
         if names:
-            text = "\n".join(f"- {n}" for n in names)  # Cada nombre en nueva línea
-            text = f"({len(names)})\n{text}"  # Mostrar cantidad
+            text = "\n".join(f"- {n}" for n in names)
+            text = f"({len(names)})\n{text}"
         else:
             text = "Nadie aún"
         embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
 
-    # Mostrar roles mencionados
     if event.get("mention_roles"):
         mentions = " ".join(f"<@&{role_id}>" for role_id in event["mention_roles"])
         embed.add_field(name="Roles mencionados", value=mentions, inline=False)
@@ -140,6 +137,45 @@ def create_event_embed(event):
         embed.set_image(url=event["image"])
     
     return embed
+
+# -----------------------------
+# 🔹 FUNCION DE ACTUALIZACIÓN DE EMBED Y HILO
+# -----------------------------
+async def update_event_embed_and_thread(event):
+    """Actualiza el embed del evento y el hilo si ya fue creado"""
+    channel = bot.get_channel(event["channel_id"])
+    if not channel:
+        return
+
+    embed = create_event_embed(event)  # Usamos la función que ya tiene todo: título, descripción, hora, duración, imagen
+
+    mentions = []
+    for role_key, (emoji, _) in BUTTONS.items():
+        if role_key == "DECLINADO":
+            continue
+        names = event.get("participants_roles", {}).get(role_key, [])
+        for name in names:
+            member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
+            if member and member not in mentions:
+                mentions.append(member)
+
+    # Actualizar mensaje original
+    if "message_id" in event:
+        try:
+            msg = await channel.fetch_message(event["message_id"])
+            await msg.edit(embed=embed)
+        except:
+            sent_msg = await channel.send(embed=embed)
+            event["message_id"] = sent_msg.id
+            save_events(events)
+
+    # Actualizar hilo si existe
+    if "thread_id" in event:
+        try:
+            thread = await channel.fetch_message(event["thread_id"])
+            await thread.channel.send(f"Nuevos inscritos: {', '.join([m.mention for m in mentions])}")
+        except:
+            pass
 
 # -----------------------------
 # BOTONES DE INSCRIPCIÓN
@@ -152,27 +188,50 @@ class EventButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         global events
-        guild_member = interaction.user
-        nickname = guild_member.display_name
-
+        nickname = interaction.user.display_name
         for event in events:
             if event["id"] == self.event_id:
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
-                # Añadir al rol seleccionado
+                # Registrar usuario en el rol seleccionado
                 if nickname not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(nickname)
+
                     # Quitar de otros roles si no permites multi-respuesta
                     for key, lst in event["participants_roles"].items():
                         if key != self.role_key and nickname in lst:
                             lst.remove(nickname)
-                    save_events(events)
 
-                embed = create_event_embed(event)
-                await interaction.message.edit(embed=embed, view=EventView(self.event_id, event["creator_id"]))
-                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
+                    save_events(events)
+                    await update_event_embed_and_thread(event)
+
+                await interaction.response.send_message(
+                    f"Te has inscrito como {self.role_key}", ephemeral=True
+                )
                 return
+
+
+class EventActionButton(discord.ui.Button):
+    def __init__(self, label, style, event_id, creator_id):
+        super().__init__(label=label, style=style)
+        self.event_id = event_id
+        self.creator_id = creator_id
+
+    async def callback(self, interaction: discord.Interaction):
+        # Lógica de editar/eliminar aquí...
+        pass
+
+
+class EventView(discord.ui.View):
+    def __init__(self, event_id, creator_id):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.creator_id = creator_id
+        for role_key, (emoji, style) in BUTTONS.items():
+            self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
+        self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
+        self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
 
 # -----------------------------
 # CLASES DE BOTONES Y VISTA
@@ -446,9 +505,6 @@ async def update_event_embed_and_thread(event):
             await thread.channel.send(f"Nuevos inscritos: {', '.join([m.mention for m in mentions])}")
         except:
             pass
-# -----------------------------
-# LOOP DE RECORDATORIOS
-# -----------------------------
 @tasks.loop(seconds=60)
 async def check_event_reminders():
     now = datetime.now()
@@ -461,18 +517,19 @@ async def check_event_reminders():
         if not channel:
             continue
 
-        # -----------------------------
-        # Crear hilo justo a los 15 minutos
-        # -----------------------------
         if not event.get("reminder_sent") and now >= reminder_time:
-            thread = await channel.create_thread(
-                name=f"Hilo - {event['title']}",
-                type=discord.ChannelType.public_thread
-            )
-            event["thread_id"] = thread.id
+            # Crear hilo solo si no existe
+            if "thread_id" not in event:
+                thread = await channel.create_thread(
+                    name=f"Hilo - {event['title']}",
+                    type=discord.ChannelType.public_thread
+                )
+                event["thread_id"] = thread.id
+
+            # Actualizar embed e hilo
             await update_event_embed_and_thread(event)
 
-            # Enviar DM a cada participante
+            # Enviar DM a participantes
             mentions = []
             for role_key, names in event.get("participants_roles", {}).items():
                 if role_key == "DECLINADO":
@@ -486,10 +543,8 @@ async def check_event_reminders():
                         except:
                             pass
 
-            if mentions:
-                await thread.send(f"¡Bienvenidos al evento! {', '.join([m.mention for m in mentions])}")
-            else:
-                await thread.send("¡Bienvenidos al evento! No hay participantes aún.")
+            thread = await channel.fetch_message(event["thread_id"])
+            await thread.channel.send(f"¡Bienvenidos al evento! {', '.join([m.mention for m in mentions])}" if mentions else "¡Bienvenidos al evento! No hay participantes aún.")
 
             event["reminder_sent"] = True
             save_events(events)
