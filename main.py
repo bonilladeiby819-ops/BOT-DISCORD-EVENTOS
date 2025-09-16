@@ -107,17 +107,26 @@ def create_event_embed(event):
         description=event["description"] or "Sin descripción",
         color=discord.Color(event.get("color", 0x00ff00))
     )
+    
     embed.add_field(name="Canal", value=f"<#{event['channel_id']}>", inline=False)
-    embed.add_field(name="Inicio", value=event["start"], inline=True)
+    
+    # Convertir la hora a timestamp de Discord
+    try:
+        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+        timestamp = int(start_dt.timestamp())
+        start_str = f"<t:{timestamp}:F>"  # Formato completo
+    except:
+        start_str = event["start"]
+    
+    embed.add_field(name="Inicio", value=start_str, inline=True)
     embed.add_field(name="Duración / Fin", value=event.get("end") or "No especificado", inline=True)
 
     # Participantes por rol
     for key, (emoji, _) in BUTTONS.items():
         names = event.get("participants_roles", {}).get(key, [])
-        count = len(names)
         if names:
-            # Cada participante en una línea y mostrar la cantidad
-            text = f"({count})\n" + "\n".join(f"- {name}" for name in names)
+            text = "\n".join(f"- {n}" for n in names)  # Cada nombre en nueva línea
+            text = f"({len(names)})\n{text}"  # Mostrar cantidad
         else:
             text = "Nadie aún"
         embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
@@ -129,6 +138,7 @@ def create_event_embed(event):
 
     if event.get("image"):
         embed.set_image(url=event["image"])
+    
     return embed
 
 # -----------------------------
