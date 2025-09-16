@@ -3,7 +3,7 @@ import os
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import json 
 
@@ -343,6 +343,49 @@ class EventView(discord.ui.View):
             self.add_item(EventButton(label=role_key, emoji=emoji, style=style, event_id=event_id, role_key=role_key))
         self.add_item(EventActionButton("Editar evento", discord.ButtonStyle.primary, event_id, creator_id))
         self.add_item(EventActionButton("Eliminar evento", discord.ButtonStyle.danger, event_id, creator_id))
+# -----------------------------
+# LOOP DE RECORDATORIOS
+# -----------------------------
+@tasks.loop(seconds=60)
+async def check_event_reminders():
+    now = datetime.now()
+    global events
+
+    for event in events:
+        if event.get("reminder_sent"):  # Ya se envió el recordatorio
+            continue
+
+        # Convertir string de inicio a datetime
+        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+
+        # Revisar si falta menos de X minutos para el inicio (ej. 10 min)
+        reminder_time = start_dt - timedelta(minutes=10)
+        if now >= reminder_time:
+            # Enviar mensaje de recordatorio
+            channel = bot.get_channel(event["channel_id"])
+            if channel:
+                try:
+                    await channel.send(f"⏰ Recordatorio: El evento **{event['title']}** empieza en 10 minutos!")
+                except:
+                    pass
+
+            # Si quieres enviar DM a creador o participantes:
+            try:
+                user = await bot.fetch_user(event["creator_id"])
+                await user.send(f"⏰ Tu evento **{event['title']}** empieza en 10 minutos!")
+            except:
+                pass
+
+            # Marcar como enviado
+            event["reminder_sent"] = True
+
+    # Guardar cambios
+    save_events(events)
+
+# -----------------------------
+# INICIAR LOOP
+# -----------------------------
+check_event_reminders.start()
 
 # -----------------------------
 # TAREA DE RECORDATORIOS Y CREACIÓN DE HILO
