@@ -125,10 +125,12 @@ async def create_event_embed(event):
             for uid in user_ids:
                 member = guild.get_member(uid) if guild else None
                 names.append(member.display_name if member else f"❓({uid})")
-            text = f"({len(user_ids)})\n" + "\n".join(f"- {n}" for n in names)
+            field_name = f"{emoji} {key} ({len(user_ids)})"  # número a la par
+            text = ", ".join(names) if names else "Nadie aún"
         else:
+            field_name = f"{emoji} {key} (0)"
             text = "Nadie aún"
-        embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
+        embed.add_field(name=field_name, value=text, inline=False)
 
     # Menciones de roles
     if event.get("mention_roles"):
