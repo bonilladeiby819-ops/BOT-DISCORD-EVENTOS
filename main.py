@@ -482,17 +482,19 @@ async def update_event_embed(event):
 # 🔹 FUNCION DE RECORDATORIO
 # -----------------------------
 async def send_event_reminder(event):
-    """Envía un recordatorio 15 min antes, sin alterar el embed original ni botones"""
+    """Envía un recordatorio 15 min antes, crea hilo y menciona participantes"""
     channel = bot.get_channel(event["channel_id"])
     if not channel:
         return
 
+    # Crear embed del recordatorio
     reminder_embed = discord.Embed(
         title=f"⏰ Recordatorio: {event['title']}",
         description=f"El evento empieza en 15 minutos en <#{channel.id}>!",
         color=discord.Color.green()
     )
 
+    # Preparar menciones y agregar campos por rol
     mentions = []
     for role_key, names in event.get("participants_roles", {}).items():
         if role_key == "DECLINADO":
@@ -503,54 +505,41 @@ async def send_event_reminder(event):
                 value="\n".join(f"- {n}" for n in names),
                 inline=False
             )
-            # Para enviar DM o mencionar en hilo
-            for name in names:
-                member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
-                if member:
-                    mentions.append(member.mention)
+        # Preparar lista de menciones
+        for name in names:
+            member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
+            if member and member not in mentions:
+                mentions.append(member)
 
     # Enviar embed en el canal
     await channel.send(embed=reminder_embed)
 
-    # Crear hilo si aún no existe
+    # Crear hilo si no existe
     if "thread_id" not in event:
-    thread = await channel.create_thread(
-        name=f"Hilo - {event['title']}",
-        type=discord.ChannelType.public_thread
-    )
-    event["thread_id"] = thread.id
-    save_events(events)
+        thread = await channel.create_thread(
+            name=f"Hilo - {event['title']}",
+            type=discord.ChannelType.public_thread
+        )
+        event["thread_id"] = thread.id
+        save_events(events)
     else:
-    thread = await bot.get_channel(event["thread_id"])
+        thread = await bot.get_channel(event["thread_id"])
 
-    # Preparar menciones de todos los roles (excepto DECLINADO)
-     mentions = []
-     guild = bot.get_guild(GUILD_ID)
-     for role_key, names in event.get("participants_roles", {}).items():
-     if role_key == "DECLINADO":
-        continue
-     for name in names:
-        member = discord.utils.find(lambda m: m.display_name == name, guild.members)
-        if member and member not in mentions:
-            mentions.append(member)
+    # Enviar mensaje de bienvenida en el hilo con menciones
+    if thread:
+        await thread.send(f"¡Bienvenidos al evento! {', '.join([m.mention for m in mentions]) if mentions else 'No hay participantes aún.'}")
 
-     # Enviar mensaje en el hilo
-     await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
+    # Enviar DM a cada participante
+    for member in mentions:
+        try:
+            await member.send(f"⏰ Tu evento **{event['title']}** empieza en 15 minutos en <#{channel.id}>!")
+        except:
+            pass
 
-    # Enviar DM a participantes
-    for role_key, names in event.get("participants_roles", {}).items():
-        if role_key == "DECLINADO":
-            continue
-        for name in names:
-            member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
-            if member:
-                try:
-                    await member.send(f"⏰ Tu evento **{event['title']}** empieza en 15 minutos en <#{channel.id}>!")
-                except:
-                    pass
-
+    # Marcar recordatorio como enviado
     event["reminder_sent"] = True
     save_events(events)
+
 
 
 # -----------------------------
