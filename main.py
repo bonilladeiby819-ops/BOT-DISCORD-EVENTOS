@@ -423,10 +423,6 @@ async def check_event_reminders():
     save_events(events)
 
 # -----------------------------
-# INICIAR LOOP
-# -----------------------------
-check_event_reminders.start()
-# -----------------------------
 # COMANDO /ping
 # -----------------------------
 @bot.tree.command(name="ping", description="Responde con Pong!", guild=discord.Object(id=GUILD_ID))
