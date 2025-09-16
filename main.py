@@ -482,10 +482,12 @@ async def update_event_embed(event):
 # 🔹 FUNCION DE RECORDATORIO
 # -----------------------------
 async def send_event_reminder(event):
-    """Envía un recordatorio 15 min antes, crea hilo y menciona participantes"""
+    """Envía un recordatorio 15 min antes, crea hilo y menciona participantes correctamente"""
     channel = bot.get_channel(event["channel_id"])
     if not channel:
         return
+
+    guild = channel.guild
 
     # Crear embed del recordatorio
     reminder_embed = discord.Embed(
@@ -505,9 +507,8 @@ async def send_event_reminder(event):
                 value="\n".join(f"- {n}" for n in names),
                 inline=False
             )
-        # Preparar lista de menciones
         for name in names:
-            member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
+            member = discord.utils.find(lambda m: m.display_name == name, guild.members)
             if member and member not in mentions:
                 mentions.append(member)
 
@@ -527,7 +528,10 @@ async def send_event_reminder(event):
 
     # Enviar mensaje de bienvenida en el hilo con menciones
     if thread:
-        await thread.send(f"¡Bienvenidos al evento! {', '.join([m.mention for m in mentions]) if mentions else 'No hay participantes aún.'}")
+        await thread.send(
+            f"¡Bienvenidos al evento! {', '.join(m.mention for m in mentions) if mentions else 'No hay participantes aún.'}",
+            allowed_mentions=discord.AllowedMentions(users=True)  # Esto permite mencionar usuarios
+        )
 
     # Enviar DM a cada participante
     for member in mentions:
@@ -536,11 +540,8 @@ async def send_event_reminder(event):
         except:
             pass
 
-    # Marcar recordatorio como enviado
     event["reminder_sent"] = True
     save_events(events)
-
-
 
 # -----------------------------
 # 🔹 LOOP DE RECORDATORIOS
