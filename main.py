@@ -901,7 +901,7 @@ async def eventos(interaction: discord.Interaction):
     # -----------------------------
     channel = bot.get_channel(event["channel_id"])
     if channel:
-        embed = create_event_embed(event)
+        embed = await create_event_embed(event)  # ✅
         sent_message = await channel.send(embed=embed, view=EventView(event_id, user.id))
         event["message_id"] = sent_message.id
         save_events(events)
