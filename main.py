@@ -107,36 +107,48 @@ def create_event_embed(event):
         description=event["description"] or "Sin descripción",
         color=discord.Color(event.get("color", 0x00ff00))
     )
-    
+
     embed.add_field(name="Canal", value=f"<#{event['channel_id']}>", inline=False)
-    
-    try:
-        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
-        timestamp = int(start_dt.timestamp())
-        start_str = f"<t:{timestamp}:F>"
-    except:
-        start_str = event["start"]
-    
+
+    # ✅ Manejo seguro de "start"
+    start_str = event.get("start")
+    if start_str:
+        try:
+            start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M")
+            timestamp = int(start_dt.timestamp())
+            start_str = f"<t:{timestamp}:F>"
+        except Exception:
+            # Si no cumple el formato, mostrarlo tal cual
+            start_str = start_str
+    else:
+        start_str = "No especificado"
+
     embed.add_field(name="Inicio", value=start_str, inline=True)
     embed.add_field(name="Duración / Fin", value=event.get("end") or "No especificado", inline=True)
 
+    guild = bot.get_guild(GUILD_ID)
+
+        # Participantes
     for key, (emoji, _) in BUTTONS.items():
-        names = event.get("participants_roles", {}).get(key, [])
-        if names:
-            text = "\n".join(f"- {n}" for n in names)
-            text = f"({len(names)})\n{text}"
+        user_ids = event.get("participants_roles", {}).get(key, [])
+        if user_ids:
+            members = [guild.get_member(uid) for uid in user_ids]
+            names = [member.display_name if member else f"❓({uid})" for uid, member in zip(user_ids, members)]
+            text = f"({len(user_ids)})\n" + "\n".join(f"- {n}" for n in names)
         else:
             text = "Nadie aún"
         embed.add_field(name=f"{emoji} {key}", value=text, inline=False)
 
+    # Roles mencionados
     if event.get("mention_roles"):
         mentions = " ".join(f"<@&{role_id}>" for role_id in event["mention_roles"])
         embed.add_field(name="Roles mencionados", value=mentions, inline=False)
 
     if event.get("image"):
         embed.set_image(url=event["image"])
-    
+
     return embed
+
 
 # -----------------------------
 # 🔹 FUNCION DE ACTUALIZACIÓN DE EMBED Y HILO
@@ -620,7 +632,7 @@ async def hola(interaction: discord.Interaction):
 # -----------------------------
 @bot.tree.command(name="eventos", description="Crear un evento paso a paso", guild=discord.Object(id=GUILD_ID))
 async def eventos(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)  # Dice a Discord "espera"
+    await interaction.response.defer(ephemeral=True)
     await interaction.followup.send("Te enviaré un DM para crear el evento paso a paso.", ephemeral=True)
     user = interaction.user
     dm = await user.create_dm()
@@ -694,18 +706,17 @@ async def eventos(interaction: discord.Interaction):
     while True:
         msg_time = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
         if msg_time.content.lower() == "cancelar":
-           await dm.send("Creación cancelada.")
-           return
+            await dm.send("Creación cancelada.")
+            return
         if msg_time.content.lower() == "ahora":
-           start_dt = datetime.now()
-           break
+            start_dt = datetime.now()
+            break
         try:
             start_dt = datetime.strptime(msg_time.content, "%Y-%m-%d %H:%M")
             break
         except:
-            await dm.send("Formato inválido. Intenta de nuevo.")  # ✅ indentado dentro del except
-        event["start"] = start_dt.strftime("%Y-%m-%d %H:%M")
-
+            await dm.send("Formato inválido. Intenta de nuevo.")
+    event["start"] = start_dt.strftime("%Y-%m-%d %H:%M")
 
     # -----------------------------
     # 6️⃣ Duración
@@ -715,7 +726,7 @@ async def eventos(interaction: discord.Interaction):
     event["end"] = duration or "No especificada"
 
     # -----------------------------
-    # 7️⃣ OPCIONES AVANZADAS
+    # 7️⃣ Opciones avanzadas
     # -----------------------------
     guild = bot.get_guild(GUILD_ID)
     roles = [r for r in guild.roles if not r.is_default() and not r.managed]
@@ -738,10 +749,7 @@ async def eventos(interaction: discord.Interaction):
             await dm.send("Creación cancelada.")
             return
 
-        # -----------------------------
-        # 1️⃣ Mencionar roles
-        # -----------------------------
-        if option == 1:
+        if option == 1:  # Mencionar roles
             if not roles:
                 await dm.send("No hay roles disponibles para mencionar.")
                 continue
@@ -763,15 +771,9 @@ async def eventos(interaction: discord.Interaction):
                 except:
                     await dm.send("Entrada inválida. Escribe los números separados por comas o 'none'.")
 
-        # -----------------------------
-        # 2️⃣ Añadir imagen
-        # -----------------------------
-        elif option == 2:
-            await dm.send("Envía la imagen directamente al chat o un URL de imagen, o escribe 'none' para omitir:")
-
-            def check_img(m):
-                return m.author == user and m.guild is None and (m.attachments or m.content)
-
+        elif option == 2:  # Imagen
+            await dm.send("Envía la imagen o un URL, o escribe 'none' para omitir:")
+            def check_img(m): return m.author == user and m.guild is None and (m.attachments or m.content)
             while True:
                 msg_img = await bot.wait_for("message", check=check_img)
                 if msg_img.content.lower() == "cancelar":
@@ -779,8 +781,6 @@ async def eventos(interaction: discord.Interaction):
                     return
                 if msg_img.content.lower() == "none":
                     break
-
-                # Archivo
                 if msg_img.attachments:
                     attachment = msg_img.attachments[0]
                     if attachment.content_type.startswith("image/"):
@@ -788,10 +788,7 @@ async def eventos(interaction: discord.Interaction):
                         await dm.send("Imagen añadida correctamente ✅")
                         break
                     else:
-                        await dm.send("El archivo no es una imagen válida. Intenta otra vez.")
-                        continue
-
-                # URL
+                        await dm.send("El archivo no es una imagen válida.")
                 elif msg_img.content.startswith("http"):
                     event["image"] = msg_img.content
                     await dm.send("Imagen añadida correctamente ✅")
@@ -799,10 +796,7 @@ async def eventos(interaction: discord.Interaction):
                 else:
                     await dm.send("Debes enviar un URL válido o subir una imagen directamente.")
 
-        # -----------------------------
-        # 3️⃣ Color
-        # -----------------------------
-        elif option == 3:
+        elif option == 3:  # Color
             await dm.send("Escribe el color en hexadecimal (ej. FF0000) o 'skip' para dejarlo verde:")
             color_hex = await wait_for_text(user, dm, 7, allow_none=True)
             if color_hex.lower() != "skip":
@@ -812,10 +806,7 @@ async def eventos(interaction: discord.Interaction):
                 except ValueError:
                     await dm.send("Color inválido, se usará verde por defecto.")
 
-        # -----------------------------
-        # 4️⃣ Restringir registro
-        # -----------------------------
-        elif option == 4:
+        elif option == 4:  # Roles permitidos
             if not roles:
                 await dm.send("No hay roles disponibles.")
                 continue
@@ -833,22 +824,16 @@ async def eventos(interaction: discord.Interaction):
                         event["allowed_roles"] = allowed_roles
                         break
                     else:
-                        await dm.send("Ningún rol válido. Intenta de nuevo o escribe 'none'.")
+                        await dm.send("Ningún rol válido. Intenta de nuevo o 'none'.")
                 except:
                     await dm.send("Entrada inválida. Intenta de nuevo.")
 
-        # -----------------------------
-        # 5️⃣ Multi-respuesta
-        # -----------------------------
-        elif option == 5:
+        elif option == 5:  # Multi-respuesta
             await dm.send("Permitir que un usuario elija múltiples roles? (si/no)")
             multi = await wait_for_text(user, dm, 3)
             event["multi_response"] = True if multi.lower() == "si" else False
 
-        # -----------------------------
-        # 6️⃣ Asignar rol automáticamente
-        # -----------------------------
-        elif option == 6:
+        elif option == 6:  # Rol asignado automáticamente
             if not roles:
                 await dm.send("No hay roles disponibles.")
                 continue
@@ -865,19 +850,29 @@ async def eventos(interaction: discord.Interaction):
                         event["assign_role"] = roles[index].id
                         break
                     else:
-                        await dm.send("Número inválido. Intenta de nuevo o 'none'.")
+                        await dm.send("Número inválido. Intenta de nuevo.")
                 except:
-                    await dm.send("Entrada inválida. Intenta de nuevo o 'none'.")
+                    await dm.send("Entrada inválida. Intenta de nuevo.")
+
         elif option == 7:  # Cierre de inscripciones
-            await dm.send("Escribe cuándo cerrar las inscripciones ('10 minutos', '1 hora', 'none'):")
-            close_time = await wait_for_text(user, dm, 50, allow_none=True)
-            if close_time.lower() != "none":
-                event["registration_close"] = close_time
+            await dm.send("Hora de cierre de inscripciones ('YYYY-MM-DD HH:MM') o 'none':")
+            while True:
+                msg_close = await bot.wait_for("message", check=lambda m: m.author == user and m.guild is None)
+                if msg_close.content.lower() == "none":
+                    event["registration_close"] = None
+                    break
+                try:
+                    dt_close = datetime.strptime(msg_close.content, "%Y-%m-%d %H:%M")
+                    event["registration_close"] = dt_close.strftime("%Y-%m-%d %H:%M")
+                    break
+                except:
+                    await dm.send("Formato inválido. Intenta de nuevo o 'none'.")
+
         elif option == 8:  # Finalizar
             break
 
     # -----------------------------
-    # Guardar evento
+    # Guardar evento en la base de datos
     # -----------------------------
     event_id = str(uuid.uuid4())
     event["id"] = event_id
@@ -891,7 +886,7 @@ async def eventos(interaction: discord.Interaction):
     save_events(events)
 
     # -----------------------------
-    # Enviar embed con roles mencionados
+    # Crear el embed y enviar
     # -----------------------------
     channel = bot.get_channel(event["channel_id"])
     if channel:
