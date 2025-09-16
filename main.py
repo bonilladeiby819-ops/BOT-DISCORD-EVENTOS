@@ -299,12 +299,12 @@ class EventButton(discord.ui.Button):
                     thread = channel.guild.get_channel(event["thread_id"])
                     if thread:
                         mentions = []
-                        for role_key, user_ids in event["participants_roles"].items():
+                        for role_key, user_ids in event.get("participants_roles", {}).items():  
                             if role_key == "DECLINADO":
                                 continue
-                            for uid in user_ids:
-                                member = channel.guild.get_member(uid)
-                                if member:
+                            for uid in user_ids:    
+                                member = guild.get_member(uid)
+                                if member and member not in mentions:
                                     mentions.append(member.mention)
                         if mentions:
                             await thread.send(f"👥 Nuevos inscritos: {', '.join(mentions)}")
@@ -564,7 +564,9 @@ async def send_event_reminder(event):
                 mentions.append(member)
 
     # Enviar embed en el canal principal
-    await channel.send(embed=reminder_embed)
+    await channel.send(
+    embed=reminder_embed,
+    content=f"Participantes confirmados: {', '.join(mentions)}" if mentions else None)
 
     # Crear hilo si no existe
     thread = None
