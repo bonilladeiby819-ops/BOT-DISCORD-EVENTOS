@@ -33,6 +33,11 @@ async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
 
 # -----------------------------
+# ARCHIVO DE EVENTOS
+# -----------------------------
+EVENTS_FILE = "eventos.json"
+
+# -----------------------------
 # BOTONES CON EMOJIS VÁLIDOS
 # -----------------------------
 BUTTONS = {
