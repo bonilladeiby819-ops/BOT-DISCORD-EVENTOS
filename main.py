@@ -192,12 +192,24 @@ class EventButton(discord.ui.Button):
                 if "participants_roles" not in event:
                     event["participants_roles"] = {key: [] for key in BUTTONS.keys()}
 
+                # Agregar al rol seleccionado si no está ya inscrito
                 if nickname not in event["participants_roles"][self.role_key]:
                     event["participants_roles"][self.role_key].append(nickname)
+
+                    # Quitar de otros roles si no permites multi-respuesta
                     for key, lst in event["participants_roles"].items():
                         if key != self.role_key and nickname in lst:
                             lst.remove(nickname)
+
+                    # Guardar cambios
                     save_events(events)
+
+                    # Actualizar embed y hilo en tiempo real
+                    await update_event_embed_and_thread(event)
+
+                # Responder al usuario
+                await interaction.response.send_message(f"Te has inscrito como {self.role_key}", ephemeral=True)
+                return
 
                 embed = create_event_embed(event)
                 channel = bot.get_channel(event["channel_id"])
