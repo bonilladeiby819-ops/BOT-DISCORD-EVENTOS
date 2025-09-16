@@ -33,6 +33,10 @@ async def on_ready():
         print(f"❌ Error al sincronizar: {e}")
 
     print(f"✅ Bot conectado como {bot.user}")
+     # Iniciar el loop de recordatorios solo si no está corriendo
+    if not check_event_reminders.is_running():
+        check_event_reminders.start()
+    
 
 # -----------------------------
 # ARCHIVO DE EVENTOS
