@@ -399,6 +399,53 @@ async def check_events():
         #     event["channel_created"] = True
         #     save_events(events)
 # -----------------------------
+# FUNCIONES AUXILIARES
+# -----------------------------
+
+async def update_event_embed_and_thread(event):
+    """Actualiza el embed del evento y el hilo si ya fue creado"""
+    channel = bot.get_channel(event["channel_id"])
+    if not channel:
+        return
+
+    embed = discord.Embed(
+        title=f"⏰ Recordatorio: {event['title']}",
+        description=f"El evento empieza en {(datetime.strptime(event['start'], '%Y-%m-%d %H:%M') - datetime.now()).seconds//60} minutos!",
+        color=discord.Color.green()
+    )
+
+    mentions = []
+    for role_key, (emoji, _) in BUTTONS.items():
+        if role_key == "DECLINADO":
+            continue
+        names = event.get("participants_roles", {}).get(role_key, [])
+        field_text = "\n".join(f"- {n}" for n in names) if names else "Nadie aún"
+        embed.add_field(name=f"{emoji} {role_key} ({len(names)})", value=field_text, inline=False)
+
+        # Para mencionar en el hilo
+        for name in names:
+            member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
+            if member and member not in mentions:
+                mentions.append(member)
+
+    # Actualizar mensaje original
+    if "message_id" in event:
+        try:
+            msg = await channel.fetch_message(event["message_id"])
+            await msg.edit(embed=embed)
+        except:
+            sent_msg = await channel.send(embed=embed)
+            event["message_id"] = sent_msg.id
+            save_events(events)
+
+    # Si el hilo ya existe, actualizarlo con los nuevos participantes
+    if "thread_id" in event:
+        try:
+            thread = await channel.fetch_message(event["thread_id"])
+            await thread.channel.send(f"Nuevos inscritos: {', '.join([m.mention for m in mentions])}")
+        except:
+            pass
+# -----------------------------
 # LOOP DE RECORDATORIOS
 # -----------------------------
 @tasks.loop(seconds=60)
@@ -407,35 +454,44 @@ async def check_event_reminders():
     global events
 
     for event in events:
-        if event.get("reminder_sent"):  # Ya se envió el recordatorio
+        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+        reminder_time = start_dt - timedelta(minutes=15)
+        channel = bot.get_channel(event["channel_id"])
+        if not channel:
             continue
 
-        # Convertir string de inicio a datetime
-        start_dt = datetime.strptime(event["start"], "%Y-%m-%d %H:%M")
+        # -----------------------------
+        # Crear hilo justo a los 15 minutos
+        # -----------------------------
+        if not event.get("reminder_sent") and now >= reminder_time:
+            thread = await channel.create_thread(
+                name=f"Hilo - {event['title']}",
+                type=discord.ChannelType.public_thread
+            )
+            event["thread_id"] = thread.id
+            await update_event_embed_and_thread(event)
 
-        # Revisar si falta menos de X minutos para el inicio (ej. 10 min)
-        reminder_time = start_dt - timedelta(minutes=10)
-        if now >= reminder_time:
-            # Enviar mensaje de recordatorio
-            channel = bot.get_channel(event["channel_id"])
-            if channel:
-                try:
-                    await channel.send(f"⏰ Recordatorio: El evento **{event['title']}** empieza en 10 minutos!")
-                except:
-                    pass
+            # Enviar DM a cada participante
+            mentions = []
+            for role_key, names in event.get("participants_roles", {}).items():
+                if role_key == "DECLINADO":
+                    continue
+                for name in names:
+                    member = discord.utils.find(lambda m: m.display_name == name, channel.guild.members)
+                    if member:
+                        mentions.append(member)
+                        try:
+                            await member.send(f"⏰ Tu evento **{event['title']}** empieza en 15 minutos en <#{channel.id}>!")
+                        except:
+                            pass
 
-            # Si quieres enviar DM a creador o participantes:
-            try:
-                user = await bot.fetch_user(event["creator_id"])
-                await user.send(f"⏰ Tu evento **{event['title']}** empieza en 10 minutos!")
-            except:
-                pass
+            if mentions:
+                await thread.send(f"¡Bienvenidos al evento! {', '.join([m.mention for m in mentions])}")
+            else:
+                await thread.send("¡Bienvenidos al evento! No hay participantes aún.")
 
-            # Marcar como enviado
             event["reminder_sent"] = True
-
-    # Guardar cambios
-    save_events(events)
+            save_events(events)
 
 # -----------------------------
 # COMANDO /ping
