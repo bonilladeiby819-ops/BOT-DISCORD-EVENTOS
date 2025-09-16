@@ -543,7 +543,7 @@ async def send_event_reminder(event):
         await thread.send(
     f"¡Bienvenidos al evento! {', '.join(m.mention for m in mentions) if mentions else 'No hay participantes aún.'}",
     allowed_mentions=discord.AllowedMentions(users=True))  # Esto permite mencionar usuarios
-        )
+
 
     # Enviar DM a cada participante
     for member in mentions:
