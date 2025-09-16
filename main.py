@@ -101,7 +101,7 @@ async def wait_for_text(user, dm, max_length, allow_none=False, cancel_word="can
 # -----------------------------
 # CREAR EMBED
 # -----------------------------
-def create_event_embed(event):
+async def create_event_embed(event):
     embed = discord.Embed(
         title=event["title"],
         description=event["description"] or "Sin descripción",
@@ -131,9 +131,14 @@ def create_event_embed(event):
         # Participantes
     for key, (emoji, _) in BUTTONS.items():
         user_ids = event.get("participants_roles", {}).get(key, [])
-        if user_ids:
-            members = [guild.get_member(uid) for uid in user_ids]
-            names = [member.display_name if member else f"❓({uid})" for uid, member in zip(user_ids, members)]
+        if user_ids:    
+            names = []
+            for uid in user_ids:
+                try:
+                    member = await guild.fetch_member(uid)  # Fuerza a obtener el miembro desde Discord
+                    names.append(member.display_name)
+                except:
+                    names.append(f"❓({uid})")
             text = f"({len(user_ids)})\n" + "\n".join(f"- {n}" for n in names)
         else:
             text = "Nadie aún"
