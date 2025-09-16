@@ -512,19 +512,30 @@ async def send_event_reminder(event):
     # Enviar embed en el canal
     await channel.send(embed=reminder_embed)
 
-    # Crear hilo si aún no existe
-    if "thread_id" not in event:
-        thread = await channel.create_thread(
-            name=f"Hilo - {event['title']}",
-            type=discord.ChannelType.public_thread
-        )
-        event["thread_id"] = thread.id
-        save_events(events)
-    else:
-        thread = await channel.fetch_channel(event["thread_id"])
+# Crear hilo si aún no existe
+if "thread_id" not in event:
+    thread = await channel.create_thread(
+        name=f"Hilo - {event['title']}",
+        type=discord.ChannelType.public_thread
+    )
+    event["thread_id"] = thread.id
+    save_events(events)
+else:
+    thread = await bot.get_channel(event["thread_id"])
 
-    # Mensaje en el hilo
-    await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
+# Preparar menciones de todos los roles (excepto DECLINADO)
+mentions = []
+guild = bot.get_guild(GUILD_ID)
+for role_key, names in event.get("participants_roles", {}).items():
+    if role_key == "DECLINADO":
+        continue
+    for name in names:
+        member = discord.utils.find(lambda m: m.display_name == name, guild.members)
+        if member and member not in mentions:
+            mentions.append(member)
+
+# Enviar mensaje en el hilo
+await thread.send(f"¡Bienvenidos al evento! {', '.join(mentions) if mentions else 'No hay participantes aún.'}")
 
     # Enviar DM a participantes
     for role_key, names in event.get("participants_roles", {}).items():
